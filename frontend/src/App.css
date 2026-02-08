@@ -1,0 +1,100 @@
+#root {
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: filter 300ms;
+}
+.logo:hover {
+  filter: drop-shadow(0 0 2em #646cffaa);
+}
+.logo.react:hover {
+  filter: drop-shadow(0 0 2em #61dafbaa);
+}
+
+@keyframes logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  a:nth-of-type(2) .logo {
+    animation: logo-spin infinite 20s linear;
+  }
+}
+
+.card {
+  padding: 2em;
+}
+
+.read-the-docs {
+  color: #888;
+}
+
+.floating-progress {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 90;
+  width: min(520px, calc(100vw - 32px));
+  border-radius: 14px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(8px);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.floating-progress--dark {
+  background: rgba(19, 19, 22, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+}
+
+.floating-progress--light {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.floating-progress__text {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 10px 12px 8px;
+  text-align: left;
+}
+
+.floating-progress--dark .floating-progress__text {
+  color: #f7f7f8;
+}
+
+.floating-progress--light .floating-progress__text {
+  color: #18181c;
+}
+
+.floating-progress__track {
+  height: 5px;
+  width: 100%;
+}
+
+.floating-progress--dark .floating-progress__track {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.floating-progress--light .floating-progress__track {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.floating-progress__bar {
+  height: 100%;
+  background: linear-gradient(90deg, #ff3b3f, #ff6b4a);
+  transition: width 180ms ease-out;
+}

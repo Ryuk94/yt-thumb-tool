@@ -1,0 +1,38 @@
+name: Refresh Established Creator Pool
+
+on:
+  schedule:
+    - cron: "30 5 * * 1"
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Refresh pool
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        run: python backend/scripts/refresh_established_pool.py --min-per-region 50
+
+      - name: Commit updates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet backend/data/established_creators.json; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git add backend/data/established_creators.json
+          git commit -m "chore: refresh established creator pool"
+          git push
