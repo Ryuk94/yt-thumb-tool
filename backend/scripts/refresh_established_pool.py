@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
+from requests import HTTPError
 
 YOUTUBE_SEARCH_LIST = "https://www.googleapis.com/youtube/v3/search"
 YOUTUBE_CHANNELS_LIST = "https://www.googleapis.com/youtube/v3/channels"
@@ -46,8 +47,35 @@ def youtube_get(api_key: str, url: str, params: dict[str, Any], timeout: int = 1
     merged = params.copy()
     merged["key"] = api_key
     response = requests.get(url, params=merged, timeout=timeout)
-    response.raise_for_status()
+    try:
+        response.raise_for_status()
+    except HTTPError as exc:
+        reason = ""
+        message = response.text
+        try:
+            payload = response.json()
+            error = payload.get("error") or {}
+            errors = error.get("errors") or []
+            if errors and isinstance(errors[0], dict):
+                reason = str(errors[0].get("reason") or "")
+            message = str(error.get("message") or message)
+        except ValueError:
+            pass
+
+        if response.status_code == 403:
+            raise RuntimeError(
+                f"YouTube API rejected the request (403). reason={reason or 'unknown'} message={message}"
+            ) from exc
+        raise
     return response.json()
+
+
+def validate_api_key(api_key: str) -> None:
+    if not api_key:
+        raise RuntimeError("YOUTUBE_API_KEY is required")
+    # Most Google API keys begin with AIza and are 39 characters long.
+    if not api_key.startswith("AIza") or len(api_key) < 35:
+        raise RuntimeError("YOUTUBE_API_KEY format looks invalid (expected prefix 'AIza').")
 
 
 def chunked(values: list[str], size: int) -> list[list[str]]:
@@ -163,8 +191,7 @@ def main() -> int:
     args = parser.parse_args()
 
     api_key = os.getenv("YOUTUBE_API_KEY", "").strip()
-    if not api_key:
-        raise RuntimeError("YOUTUBE_API_KEY is required")
+    validate_api_key(api_key)
 
     regions = ["US", "GB", "CA", "AU"]
     region_payload: dict[str, list[dict[str, Any]]] = {}
