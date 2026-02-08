@@ -1,0 +1,70 @@
+name: Refresh Established Creator Pool
+
+on:
+  schedule:
+    - cron: "30 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Validate YouTube key in CI
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        run: |
+          python - <<'PY'
+          import os
+          import requests
+
+          key = (os.getenv("YOUTUBE_API_KEY") or "").strip()
+          if not key:
+              raise SystemExit("Missing secret: YOUTUBE_API_KEY")
+          if not key.startswith("AIza") or len(key) < 35:
+              raise SystemExit("YOUTUBE_API_KEY looks malformed (expected prefix AIza).")
+
+          r = requests.get(
+              "https://www.googleapis.com/youtube/v3/search",
+              params={
+                  "part": "snippet",
+                  "type": "channel",
+                  "q": "US entertainment creator",
+                  "regionCode": "US",
+                  "maxResults": 1,
+                  "key": key,
+              },
+              timeout=20,
+          )
+          if r.status_code != 200:
+              try:
+                  payload = r.json()
+              except Exception:
+                  payload = {"raw": r.text}
+              raise SystemExit(f"YouTube key preflight failed: status={r.status_code} payload={payload}")
+          print("YouTube key preflight passed.")
+          PY
+
+      - name: Refresh pool
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        run: python backend/scripts/refresh_established_pool.py --min-per-region 50
+
+      - name: Commit updates
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet backend
