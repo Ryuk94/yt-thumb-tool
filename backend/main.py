@@ -161,6 +161,11 @@ class PatternSaveRequest(BaseModel):
     notes: str | None = None
 
 
+class PatternUpdateRequest(BaseModel):
+    name: str | None = None
+    notes: str | None = None
+
+
 class YouTubeQuotaExceededError(Exception):
     pass
 
@@ -1810,6 +1815,30 @@ def delete_pattern(pattern_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Pattern not found")
     persist_pattern_library(snapshot)
     return {"ok": True, "pattern_id": pattern_id}
+
+
+@app.patch("/patterns/{pattern_id}")
+def update_pattern(pattern_id: str, payload: PatternUpdateRequest, request: Request):
+    enforce_api_rate_limit(request, scope="patterns_update")
+    with PATTERN_LIBRARY_LOCK:
+        pattern = PATTERN_LIBRARY.get(pattern_id)
+        if not pattern:
+            raise HTTPException(status_code=404, detail="Pattern not found")
+
+        updated = dict(pattern)
+        if payload.name is not None:
+            name = payload.name.strip()
+            if not name:
+                raise HTTPException(status_code=400, detail="name cannot be empty")
+            updated["name"] = name
+        if payload.notes is not None:
+            updated["notes"] = payload.notes.strip() or None
+        updated["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        PATTERN_LIBRARY[pattern_id] = updated
+        snapshot = dict(PATTERN_LIBRARY)
+
+    persist_pattern_library(snapshot)
+    return {"ok": True, "pattern_id": pattern_id, "pattern": updated}
 
 
 @app.get("/top")

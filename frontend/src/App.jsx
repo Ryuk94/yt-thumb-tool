@@ -1292,6 +1292,61 @@ export default function App() {
     fetchSavedPatterns,
   ]);
 
+  const renameSavedPattern = useCallback((pattern) => {
+    if (!isProUser) {
+      setPatternError("Pattern management is a Pro feature.");
+      setPricingOpen(true);
+      return;
+    }
+    const patternId = String(pattern?.pattern_id || "").trim();
+    if (!patternId) return;
+    const currentName = String(pattern?.name || "").trim();
+    const nextName = window.prompt("Rename pattern", currentName);
+    if (nextName == null) return;
+    const trimmed = nextName.trim();
+    if (!trimmed) {
+      setPatternError("Pattern name cannot be empty.");
+      return;
+    }
+    const loadingToken = startGlobalLoading("Renaming pattern...", 26);
+    setPatternError("");
+    fetch(apiUrl(`/patterns/${encodeURIComponent(patternId)}`), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: trimmed }),
+    })
+      .then(async (r) => {
+        updateGlobalLoading(loadingToken, "Updating pattern library...", 80);
+        if (!r.ok) throw new Error(await readApiErrorDetail(r, "Failed to rename pattern."));
+        return r.json();
+      })
+      .then((payload) => {
+        const updated = payload?.pattern || {};
+        setSavedPatterns((prev) =>
+          prev.map((entry) =>
+            entry.pattern_id === patternId
+              ? { ...entry, name: updated.name || trimmed, updated_at: updated.updated_at || entry.updated_at }
+              : entry
+          )
+        );
+        if (activePattern?.pattern_id === patternId) {
+          setActivePattern((prev) => (prev ? { ...prev, name: updated.name || trimmed } : prev));
+        }
+        fetchSavedPatterns(true);
+      })
+      .catch((err) => {
+        setPatternError(err.message || "Failed to rename pattern.");
+      })
+      .finally(() => endGlobalLoading(loadingToken));
+  }, [
+    isProUser,
+    activePattern,
+    startGlobalLoading,
+    updateGlobalLoading,
+    endGlobalLoading,
+    fetchSavedPatterns,
+  ]);
+
   const onProfileKeyDown = (e) => {
     if (e.key === "Enter") fetchProfile(true);
   };
@@ -1742,6 +1797,18 @@ export default function App() {
                       style={tabButtonStyle(false)}
                     >
                       {pattern.name}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Rename ${pattern.name}`}
+                      onClick={() => renameSavedPattern(pattern)}
+                      style={{
+                        ...tabButtonStyle(false),
+                        minWidth: 36,
+                        padding: "8px 10px",
+                      }}
+                    >
+                      {"\u270E"}
                     </button>
                     <button
                       type="button"

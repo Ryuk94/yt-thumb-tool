@@ -416,3 +416,27 @@ def test_patterns_compare(monkeypatch, tmp_path):
     assert payload["summary"]["union_signatures"] == 3
     assert payload["summary"]["overlap_signatures"] == 1
     assert len(payload["rows"]) == 3
+
+
+def test_pattern_update(monkeypatch, tmp_path):
+    main_module.PATTERN_LIBRARY.clear()
+    monkeypatch.setattr(main_module, "PATTERN_LIBRARY_FILE", tmp_path / "pattern_library.json")
+    created = main_module.save_pattern(
+        main_module.PatternSaveRequest(
+            name="original",
+            clusters=[{"cluster_id": "cluster_1", "signature": "sig:a", "count": 1}],
+            filters={},
+        ),
+        make_request(),
+    )
+    pattern_id = created["pattern_id"]
+
+    updated = main_module.update_pattern(
+        pattern_id=pattern_id,
+        payload=main_module.PatternUpdateRequest(name="renamed", notes="note"),
+        request=make_request(),
+    )
+    assert updated["ok"] is True
+    assert updated["pattern"]["name"] == "renamed"
+    assert updated["pattern"]["notes"] == "note"
+    assert updated["pattern"].get("updated_at")
