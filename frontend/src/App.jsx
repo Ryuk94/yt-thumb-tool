@@ -1651,6 +1651,22 @@ export default function App() {
     showGlobalNotice,
   ]);
 
+  const resetPatternWorkspace = useCallback(() => {
+    setPatternError("");
+    setPatternItems([]);
+    setPatternClusters([]);
+    setAppliedPatternItems([]);
+    setActivePattern(null);
+    setApplyPatternId("");
+    setComparePatternA(null);
+    setComparePatternB(null);
+    setCompareResult(null);
+    setComparePatternAId("");
+    setComparePatternBId("");
+    setSelectedPatternIds([]);
+    showGlobalNotice("Pattern workspace reset.", "info", 1800);
+  }, [showGlobalNotice]);
+
   const exportPatternLibrary = useCallback(() => {
     if (!isProUser) {
       setPatternError("Pattern export is a Pro feature.");
@@ -2221,6 +2237,9 @@ export default function App() {
               />
               <button onClick={() => applySavedPattern()} disabled={patternApplying} style={actionButtonStyle(patternApplying)}>
                 {patternApplying ? "Loading..." : "Apply Pattern"}
+              </button>
+              <button type="button" onClick={resetPatternWorkspace} style={tabButtonStyle(false)}>
+                Reset Workspace
               </button>
             </div>
 
