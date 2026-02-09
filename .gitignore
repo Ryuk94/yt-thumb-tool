@@ -1,0 +1,23 @@
+# Local Netlify folder
+.netlify
+
+# Python caches and virtual environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Local environment files
+.env
+backend/.env
+
+# Node artifacts
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# OS/editor artifacts
+.DS_Store
+Thumbs.db
+.vscode/

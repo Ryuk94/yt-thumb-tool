@@ -1,12 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import "./App.css";
 
-const API_BASE = "http://localhost:8000";
+const RAW_API_BASE =
+  import.meta.env.VITE_API_BASE_URL ||
+  (typeof window !== "undefined" && window.location.hostname === "localhost" ? "http://localhost:8000" : "/api");
+const API_BASE = RAW_API_BASE.replace(/\/$/, "");
 const ACCENT_RED = "#ff3b3f";
 const REGION_OPTIONS = [
+  { value: "GLOBAL", label: "Global" },
+  { value: "AU", label: "AU" },
+  { value: "CA", label: "CA" },
   { value: "GB", label: "GB" },
   { value: "US", label: "US" },
-  { value: "CA", label: "CA" },
-  { value: "AU", label: "AU" },
 ];
 const WINNERS_CATEGORIES = [
   { value: "all", label: "All" },
@@ -15,6 +20,10 @@ const WINNERS_CATEGORIES = [
   { value: "entertainment", label: "Entertainment" },
   { value: "sports", label: "Sports" },
 ];
+
+function apiUrl(pathWithLeadingSlash) {
+  return `${API_BASE}${pathWithLeadingSlash}`;
+}
 
 function SubTabButton({ active, children, onClick, darkMode }) {
   return (
@@ -169,11 +178,10 @@ function ThumbnailGrid({ items, portraitMode = false }) {
         const aspectRatio = v.thumb_insights?.aspect_ratio ?? v.thumbnail_aspect_ratio;
 
         return (
-          <a
+          <button
+            className="thumb-card"
             key={id || href}
-            href={href}
-            target="_blank"
-            rel="noreferrer"
+            type="button"
             style={{
               textDecoration: "none",
               color: "#111",
@@ -181,6 +189,29 @@ function ThumbnailGrid({ items, portraitMode = false }) {
               borderRadius: 12,
               overflow: "hidden",
               background: "#fff",
+              width: "100%",
+              padding: 0,
+              cursor: "pointer",
+              textAlign: "left",
+            }}
+            onClick={() => {
+              window.dispatchEvent(
+                new CustomEvent("open-thumbnail-preview", {
+                  detail: {
+                    ...v,
+                    id,
+                    href,
+                    __portraitMode: portraitMode,
+                    thumbnail: thumb,
+                    channelTitle: channel,
+                    views,
+                    outlier_score: outlier,
+                    views_per_day: vpd,
+                    quality_score: qualityScore,
+                    aspect_ratio: aspectRatio,
+                  },
+                })
+              );
             }}
           >
             {portraitMode ? (
@@ -226,7 +257,7 @@ function ThumbnailGrid({ items, portraitMode = false }) {
                 </div>
               )}
             </div>
-          </a>
+          </button>
         );
       })}
     </div>
@@ -236,8 +267,8 @@ function ThumbnailGrid({ items, portraitMode = false }) {
 function LoadMoreButton({ onClick, disabled, style }) {
   return (
     <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
-      <button onClick={onClick} disabled={disabled} style={style}>
-        Load more
+      <button onClick={onClick} disabled={disabled} aria-label="Load more" style={{ ...style, fontSize: 18, lineHeight: 1 }}>
+        {"\u25BC"}
       </button>
     </div>
   );
@@ -246,10 +277,89 @@ function LoadMoreButton({ onClick, disabled, style }) {
 function FloatingProgress({ active, message, progress, darkMode }) {
   if (!active) return null;
   return (
-    <div className={`floating-progress ${darkMode ? "floating-progress--dark" : "floating-progress--light"}`}>
-      <div className="floating-progress__text">{message}</div>
-      <div className="floating-progress__track">
-        <div className="floating-progress__bar" style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} />
+    <>
+      <div className="floating-progress-backdrop" />
+      <div className={`floating-progress ${darkMode ? "floating-progress--dark" : "floating-progress--light"}`}>
+        <div className="floating-progress__head">
+          <div className="floating-progress__spinner" />
+          <div className="floating-progress__titles">
+            <div className="floating-progress__label">Processing Request</div>
+            <div className="floating-progress__text">{message}</div>
+          </div>
+          <div className="floating-progress__percent">{Math.max(0, Math.min(100, Math.round(progress)))}%</div>
+        </div>
+        <div className="floating-progress__track">
+          <div className="floating-progress__bar" style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} />
+        </div>
+      </div>
+    </>
+  );
+}
+
+function formatMetricValue(value, fallback = "-") {
+  if (value == null) return fallback;
+  if (typeof value === "number") return Number.isFinite(value) ? value.toLocaleString() : fallback;
+  if (typeof value === "string" && value.trim()) return value;
+  return fallback;
+}
+
+function formatDuration(duration) {
+  if (duration == null || !Number.isFinite(Number(duration))) return "-";
+  const total = Math.max(0, Math.floor(Number(duration)));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function ThumbnailPreviewModal({
+  item,
+  onClose,
+  onDownload,
+  onSearchProfile,
+  onVisitProfile,
+  darkMode,
+}) {
+  if (!item) return null;
+  const numericAr = Number(item.aspect_ratio || item.thumbnail_aspect_ratio || 0);
+  const isShort = Boolean(item.__portraitMode) || (numericAr > 0 && numericAr < 1);
+  const aspectText = item.aspect_ratio || item.thumbnail_aspect_ratio ? Number(item.aspect_ratio || item.thumbnail_aspect_ratio).toFixed(2) : "-";
+
+  return (
+    <div className="thumb-preview-overlay" onClick={onClose}>
+      <div className="thumb-preview-shell" onClick={(e) => e.stopPropagation()}>
+        <div className={`thumb-preview-frame ${isShort ? "thumb-preview-frame--shorts" : ""}`}>
+          <img className="thumb-preview-image" src={item.thumbnail} alt={item.title || "Thumbnail preview"} />
+        </div>
+
+        <div className="thumb-preview-actions">
+          <button type="button" className="thumb-preview-action-btn" title="Download thumbnail" onClick={onDownload}>
+            {"\u2193"}
+          </button>
+          <button type="button" className="thumb-preview-action-btn" title="Search profile in app" onClick={onSearchProfile}>
+            {"\u2315"}
+          </button>
+          <button type="button" className="thumb-preview-action-btn" title="Open profile on YouTube" onClick={onVisitProfile}>
+            {"\u2197"}
+          </button>
+        </div>
+
+        <aside className={`thumb-preview-panel ${darkMode ? "thumb-preview-panel--dark" : "thumb-preview-panel--light"}`}>
+          <h3 className="thumb-preview-title">{item.title || "Untitled video"}</h3>
+          <div className="thumb-preview-channel">{item.channelTitle || item.channel_title || "Unknown channel"}</div>
+
+          <div className="thumb-preview-metrics">
+            <div><strong>Views:</strong> {formatMetricValue(item.views ?? item.view_count)}</div>
+            <div><strong>Duration:</strong> {formatDuration(item.duration ?? item.duration_seconds)}</div>
+            <div><strong>Aspect Ratio:</strong> {aspectText}</div>
+            <div><strong>Quality:</strong> {formatMetricValue(item.quality_score ?? item.thumb_insights?.quality_score)}</div>
+            <div><strong>Outlier:</strong> {item.outlier_score != null ? `x${Number(item.outlier_score).toFixed(2)}` : "-"}</div>
+            <div><strong>Views/Day:</strong> {item.views_per_day != null ? Number(item.views_per_day).toFixed(1) : "-"}</div>
+            <div><strong>Published:</strong> {formatMetricValue(item.publishedAt || item.published_at)}</div>
+            <div><strong>Source:</strong> {formatMetricValue(item.source_group)}</div>
+          </div>
+        </aside>
       </div>
     </div>
   );
@@ -272,7 +382,14 @@ export default function App() {
 
   const [items, setItems] = useState([]);
   const [trendingLoading, setTrendingLoading] = useState(false);
-  const [region, setRegion] = useState("GB");
+  const [region, setRegion] = useState(() => {
+    try {
+      const saved = localStorage.getItem("selectedRegion");
+      return saved || "GLOBAL";
+    } catch {
+      return "GLOBAL";
+    }
+  });
   const [type, setType] = useState("all");
   const [nextTokenTop, setNextTokenTop] = useState(null);
   const [nextTokenDiscover, setNextTokenDiscover] = useState(null);
@@ -309,9 +426,10 @@ export default function App() {
   const [darkMode, setDarkMode] = useState(() => readCookie("darkMode") === "1");
   const [globalLoading, setGlobalLoading] = useState({ active: false, message: "", progress: 0 });
   const loadingTokenRef = useRef(0);
+  const [previewItem, setPreviewItem] = useState(null);
 
   const isShorts = type === "shorts";
-  const baseUrl = useMemo(() => (isShorts ? `${API_BASE}/discover` : `${API_BASE}/top`), [isShorts]);
+  const baseUrl = useMemo(() => (isShorts ? apiUrl("/discover") : apiUrl("/top")), [isShorts]);
 
   const startGlobalLoading = useCallback((message, progress = 10) => {
     const token = loadingTokenRef.current + 1;
@@ -371,6 +489,31 @@ export default function App() {
     document.body.style.color = darkMode ? "#f5f5f5" : "#111";
     writeCookie("darkMode", darkMode ? "1" : "0");
   }, [darkMode]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("selectedRegion", region);
+    } catch {
+      // ignore
+    }
+  }, [region]);
+
+  useEffect(() => {
+    const onOpenPreview = (event) => {
+      setPreviewItem(event.detail || null);
+    };
+    window.addEventListener("open-thumbnail-preview", onOpenPreview);
+    return () => window.removeEventListener("open-thumbnail-preview", onOpenPreview);
+  }, []);
+
+  useEffect(() => {
+    if (!previewItem) return;
+    const onKeyDown = (event) => {
+      if (event.key === "Escape") setPreviewItem(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [previewItem]);
 
   const buildParams = (pageToken = null) => {
     if (isShorts) {
@@ -452,8 +595,8 @@ export default function App() {
     });
   };
 
-  const fetchProfile = (reset = false) => {
-    const cleaned = profileUrl.trim();
+  const fetchProfile = (reset = false, explicitProfileUrl = null) => {
+    const cleaned = (explicitProfileUrl ?? profileUrl).trim();
     if (!cleaned) {
       setProfileError("Enter a YouTube profile URL, handle, or channel ID.");
       return;
@@ -481,7 +624,7 @@ export default function App() {
     setProfileLoading(true);
     const loadingToken = startGlobalLoading(reset ? "Resolving channel..." : "Loading more profile items...", 12);
 
-    fetch(`${API_BASE}/profile?${params.toString()}`)
+    fetch(`${apiUrl("/profile")}?${params.toString()}`)
       .then(async (r) => {
         updateGlobalLoading(loadingToken, "Fetching profile thumbnails...", 54);
         if (!r.ok) {
@@ -498,7 +641,11 @@ export default function App() {
       })
       .then((d) => {
         updateGlobalLoading(loadingToken, "Composing profile grid...", 86);
-        const next = d.items || [];
+        const channelId = d?.meta?.channel_id || null;
+        const next = (d.items || []).map((item) => ({
+          ...item,
+          channel_id: item.channel_id || channelId,
+        }));
         setProfileItems((prev) => (reset ? next : [...prev, ...next]));
         setProfileNextToken(d.nextPageToken || null);
         if (reset) persistProfileSearch(cleaned);
@@ -514,6 +661,47 @@ export default function App() {
         setProfileLoading(false);
         endGlobalLoading(loadingToken);
       });
+  };
+
+  const handleDownloadPreview = async () => {
+    if (!previewItem?.thumbnail) return;
+    try {
+      const response = await fetch(previewItem.thumbnail);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${previewItem.id || "thumbnail"}.jpg`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      // no-op
+    }
+  };
+
+  const handleSearchProfileFromPreview = () => {
+    if (!previewItem) return;
+    const profileQuery = String(previewItem.channel_id || previewItem.channelTitle || previewItem.channel_title || "").trim();
+    if (!profileQuery) return;
+    setTab("profile");
+    setProfileUrl(profileQuery);
+    setProfileHasSearched(true);
+    setPreviewItem(null);
+    fetchProfile(true, profileQuery);
+  };
+
+  const handleVisitProfileFromPreview = () => {
+    if (!previewItem) return;
+    const channelId = String(previewItem.channel_id || "").trim();
+    const channelName = String(previewItem.channelTitle || previewItem.channel_title || "").trim();
+    const url = channelId
+      ? `https://www.youtube.com/channel/${encodeURIComponent(channelId)}`
+      : channelName
+      ? `https://www.youtube.com/results?search_query=${encodeURIComponent(channelName)}`
+      : previewItem.href;
+    if (url) window.open(url, "_blank", "noopener,noreferrer");
   };
 
   useEffect(() => {
@@ -540,7 +728,7 @@ export default function App() {
       min_quality: String(winnersMinQuality),
     });
 
-    fetch(`${API_BASE}/youtube/winners?${params.toString()}`)
+    fetch(`${apiUrl("/youtube/winners")}?${params.toString()}`)
       .then(async (r) => {
         updateGlobalLoading(loadingToken, "Scoring thumbnail quality...", 62);
         if (!r.ok) {
@@ -657,10 +845,18 @@ export default function App() {
         progress={globalLoading.progress}
         darkMode={darkMode}
       />
+      <ThumbnailPreviewModal
+        item={previewItem}
+        onClose={() => setPreviewItem(null)}
+        onDownload={handleDownloadPreview}
+        onSearchProfile={handleSearchProfileFromPreview}
+        onVisitProfile={handleVisitProfileFromPreview}
+        darkMode={darkMode}
+      />
       <div style={{ width: "100%" }}>
         <h1 style={{ marginBottom: 12 }}>YouTube Top Thumbnails</h1>
 
-        <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+        <div style={{ display: "flex", gap: 10, marginBottom: 12, justifyContent: "center", flexWrap: "wrap" }}>
           <button onClick={() => setTab("trending")} style={tabButtonStyle(tab === "trending")}>Trending</button>
           <button onClick={() => setTab("profile")} style={tabButtonStyle(tab === "profile")}>Profile</button>
           <button onClick={() => setTab("winners")} style={tabButtonStyle(tab === "winners")}>Winners</button>
@@ -668,7 +864,7 @@ export default function App() {
 
         {tab === "trending" && (
           <>
-            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", justifyContent: "center" }}>
               <RoundedDropdown
                 value={region}
                 onChange={setRegion}
@@ -696,69 +892,75 @@ export default function App() {
 
         {tab === "profile" && (
           <>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-          <div style={{ flex: "1 1 360px", minWidth: 280, display: "flex", gap: 0 }}>
-            <div style={{ position: "relative", width: "100%" }}>
-              <input
-                type="text"
-                placeholder="Channel URL, @handle, or channel ID"
-                value={profileUrl}
-                onChange={(e) => setProfileUrl(e.target.value)}
-                onKeyDown={onProfileKeyDown}
-                onFocus={() => setShowProfileSuggestions(true)}
-                onBlur={() => setTimeout(() => setShowProfileSuggestions(false), 150)}
-                style={{ ...roundedFieldStyle, width: "100%", borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
-              />
-              {showProfileSuggestions && profileSearches.length > 0 && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "100%",
-                    left: 0,
-                    right: 0,
-                    marginTop: 4,
-                    background: darkMode ? "#1c1c1f" : "#fff",
-                    border: `1px solid ${darkMode ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.2)"}`,
-                    borderRadius: 12,
-                    zIndex: 10,
-                    boxShadow: "0 12px 24px rgba(0,0,0,0.15)",
-                    overflow: "hidden",
-                  }}
-                >
-                  {profileSearches.map((search) => (
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center", marginTop: 4 }}>
+              <div style={{ flex: "1 1 520px", maxWidth: 720, minWidth: 280, display: "flex", gap: 0 }}>
+                <div style={{ position: "relative", width: "100%" }}>
+                  <input
+                    type="text"
+                    placeholder="Channel URL, @handle, or channel ID"
+                    value={profileUrl}
+                    onChange={(e) => setProfileUrl(e.target.value)}
+                    onKeyDown={onProfileKeyDown}
+                    onFocus={() => setShowProfileSuggestions(true)}
+                    onBlur={() => setTimeout(() => setShowProfileSuggestions(false), 150)}
+                    style={{ ...roundedFieldStyle, width: "100%", borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
+                  />
+                  {showProfileSuggestions && profileSearches.length > 0 && (
                     <div
-                      key={search}
-                      onMouseDown={(e) => {
-                        e.preventDefault();
-                        setProfileUrl(search);
-                        setShowProfileSuggestions(false);
-                      }}
                       style={{
-                        padding: "8px 12px",
-                        cursor: "pointer",
-                        color: darkMode ? "#fff" : "#111",
-                        borderBottom: "1px solid rgba(0,0,0,0.06)",
+                        position: "absolute",
+                        top: "100%",
+                        left: 0,
+                        right: 0,
+                        marginTop: 4,
+                        background: darkMode ? "#1c1c1f" : "#fff",
+                        border: `1px solid ${darkMode ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.2)"}`,
+                        borderRadius: 12,
+                        zIndex: 10,
+                        boxShadow: "0 12px 24px rgba(0,0,0,0.15)",
+                        overflow: "hidden",
                       }}
                     >
-                      {search}
+                      {profileSearches.map((search) => (
+                        <div
+                          key={search}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            setProfileUrl(search);
+                            setShowProfileSuggestions(false);
+                          }}
+                          style={{
+                            padding: "8px 12px",
+                            cursor: "pointer",
+                            color: darkMode ? "#fff" : "#111",
+                            borderBottom: "1px solid rgba(0,0,0,0.06)",
+                          }}
+                        >
+                          {search}
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
                 </div>
-              )}
-            </div>
-            <button
-              onClick={() => fetchProfile(true)}
-              disabled={profileLoading}
-                  style={{ ...searchButtonStyle, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, opacity: profileLoading ? 0.6 : 1 }}
-                >
-                  Search
-                </button>
+                <button
+                  onClick={() => fetchProfile(true)}
+                  disabled={profileLoading}
+                    style={{ ...searchButtonStyle, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, opacity: profileLoading ? 0.6 : 1 }}
+                  >
+                    Search
+                  </button>
+                </div>
               </div>
+
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", justifyContent: "center", marginTop: 10 }}>
               <div style={{ display: "flex", gap: 8 }}>
                 <SubTabButton active={profileType === "all"} onClick={() => handleProfileTypeChange("all")} darkMode={darkMode}>All</SubTabButton>
                 <SubTabButton active={profileType === "shorts"} onClick={() => handleProfileTypeChange("shorts")} darkMode={darkMode}>Shorts</SubTabButton>
                 <SubTabButton active={profileType === "videos"} onClick={() => handleProfileTypeChange("videos")} darkMode={darkMode}>Videos</SubTabButton>
               </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", justifyContent: "center", marginTop: 10 }}>
               <div style={{ display: "flex", gap: 8 }}>
                 <SubTabButton active={profileSort === "recent"} onClick={() => handleProfileSortChange("recent")} darkMode={darkMode}>Recent</SubTabButton>
                 <SubTabButton active={profileSort === "popular"} onClick={() => handleProfileSortChange("popular")} darkMode={darkMode}>Popular</SubTabButton>
@@ -777,12 +979,12 @@ export default function App() {
 
         {tab === "winners" && (
           <>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
               <SubTabButton active={winnersFormat === "videos"} onClick={() => handleWinnersFormatChange("videos")} darkMode={darkMode}>Videos</SubTabButton>
               <SubTabButton active={winnersFormat === "shorts"} onClick={() => handleWinnersFormatChange("shorts")} darkMode={darkMode}>Shorts</SubTabButton>
             </div>
 
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10, justifyContent: "center" }}>
               {WINNERS_CATEGORIES.map((category) => (
                 <SubTabButton
                   key={category.value}
@@ -795,7 +997,7 @@ export default function App() {
               ))}
             </div>
 
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 12 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 12, justifyContent: "center" }}>
               <RoundedDropdown
                 value={region}
                 onChange={setRegion}
@@ -859,6 +1061,8 @@ export default function App() {
                   display: "flex",
                   gap: 12,
                   flexWrap: "wrap",
+                  justifyContent: "center",
+                  textAlign: "center",
                   ...infoBoxStyle,
                 }}
               >
@@ -908,4 +1112,5 @@ export default function App() {
     </div>
   );
 }
+
 

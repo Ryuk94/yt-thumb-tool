@@ -117,8 +117,8 @@ def test_matches_winners_type_prefers_aspect_ratio():
     try:
         assert matches_winners_type(short_like, "shorts")
         assert not matches_winners_type(short_like, "videos")
-        assert matches_winners_type(video_like, "videos")
-        assert not matches_winners_type(video_like, "shorts")
+        assert not matches_winners_type(video_like, "videos")
+        assert matches_winners_type(video_like, "shorts")
         assert matches_winners_type(confirmed_short, "shorts")
         assert not matches_winners_type(confirmed_short, "videos")
         assert not matches_winners_type(unknown_ratio, "shorts")

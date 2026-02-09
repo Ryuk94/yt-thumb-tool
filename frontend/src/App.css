@@ -45,31 +45,73 @@
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  z-index: 90;
+  z-index: 95;
   width: min(520px, calc(100vw - 32px));
   border-radius: 14px;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.24);
   backdrop-filter: blur(8px);
   overflow: hidden;
   pointer-events: none;
 }
 
+.floating-progress-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 94;
+  background: rgba(8, 10, 14, 0.2);
+  backdrop-filter: blur(1px);
+  pointer-events: none;
+}
+
 .floating-progress--dark {
-  background: rgba(19, 19, 22, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(16, 18, 24, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
 .floating-progress--light {
-  background: rgba(255, 255, 255, 0.94);
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.floating-progress__head {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 14px 10px;
+}
+
+.floating-progress__spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  border-top-color: #ff5d55;
+  border-right-color: #ff3b3f;
+  animation: floating-progress-spin 0.9s linear infinite;
+}
+
+.floating-progress__titles {
+  min-width: 0;
+}
+
+.floating-progress__label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  opacity: 0.78;
 }
 
 .floating-progress__text {
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.01em;
-  padding: 10px 12px 8px;
+  margin-top: 3px;
   text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .floating-progress--dark .floating-progress__text {
@@ -77,6 +119,29 @@
 }
 
 .floating-progress--light .floating-progress__text {
+  color: #18181c;
+}
+
+.floating-progress--dark .floating-progress__label {
+  color: #f2f3f5;
+}
+
+.floating-progress--light .floating-progress__label {
+  color: #252932;
+}
+
+.floating-progress__percent {
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 42px;
+  text-align: right;
+}
+
+.floating-progress--dark .floating-progress__percent {
+  color: #f7f7f8;
+}
+
+.floating-progress--light .floating-progress__percent {
   color: #18181c;
 }
 
@@ -97,4 +162,201 @@
   height: 100%;
   background: linear-gradient(90deg, #ff3b3f, #ff6b4a);
   transition: width 180ms ease-out;
+}
+
+button:not(:disabled),
+.thumb-card {
+  transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
+}
+
+button:not(:disabled):hover {
+  transform: scale(1.03);
+}
+
+.thumb-card:hover {
+  transform: scale(1.015);
+  box-shadow: 0 12px 22px rgba(0, 0, 0, 0.16);
+}
+
+.thumb-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  display: grid;
+  place-items: center;
+  background: rgba(11, 14, 19, 0.54);
+  backdrop-filter: blur(6px);
+  animation: preview-overlay-in 180ms ease-out;
+}
+
+.thumb-preview-shell {
+  width: min(1260px, calc(100vw - 36px));
+  max-height: calc(100vh - 36px);
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) 70px;
+  grid-template-areas:
+    "media actions"
+    "panel panel";
+  gap: 18px;
+  align-items: center;
+  animation: preview-shell-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.thumb-preview-frame {
+  grid-area: media;
+  width: 100%;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.35);
+  background: #12151d;
+  display: grid;
+  place-items: center;
+}
+
+.thumb-preview-frame--shorts {
+  width: auto;
+  max-width: min(42vw, 480px);
+  justify-self: center;
+}
+
+.thumb-preview-image {
+  width: 100%;
+  max-height: calc(100vh - 72px);
+  object-fit: contain;
+  display: block;
+}
+
+.thumb-preview-frame--shorts .thumb-preview-image {
+  width: auto;
+  max-width: min(42vw, 480px);
+  height: min(84vh, 900px);
+  max-height: min(84vh, 900px);
+}
+
+.thumb-preview-actions {
+  grid-area: actions;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.thumb-preview-action-btn {
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.25);
+  transition: transform 150ms ease, background 150ms ease;
+}
+
+.thumb-preview-action-btn:hover {
+  transform: scale(1.08);
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.thumb-preview-panel {
+  grid-area: panel;
+  width: min(860px, calc(100% - 70px));
+  justify-self: center;
+  border-radius: 16px;
+  padding: 16px 16px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 22px 40px rgba(0, 0, 0, 0.25);
+}
+
+.thumb-preview-panel--dark {
+  background: rgba(16, 19, 25, 0.95);
+  color: #f4f6f8;
+}
+
+.thumb-preview-panel--light {
+  background: rgba(255, 255, 255, 0.95);
+  color: #12161d;
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.thumb-preview-title {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.3;
+}
+
+.thumb-preview-channel {
+  margin-top: 8px;
+  font-size: 13px;
+  opacity: 0.85;
+}
+
+.thumb-preview-metrics {
+  margin-top: 14px;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  text-align: left;
+}
+
+@keyframes preview-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes preview-shell-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 1024px) {
+  .thumb-preview-shell {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "media"
+      "actions"
+      "panel";
+    gap: 12px;
+    justify-items: center;
+  }
+
+  .thumb-preview-actions {
+    flex-direction: row;
+    height: auto;
+  }
+
+  .thumb-preview-panel {
+    width: min(720px, 100%);
+  }
+
+  .thumb-preview-frame--shorts .thumb-preview-image {
+    max-width: min(72vw, 420px);
+  }
+}
+
+@keyframes floating-progress-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }

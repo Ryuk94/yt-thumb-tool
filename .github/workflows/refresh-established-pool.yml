@@ -3,7 +3,6 @@ name: Refresh Established Creator Pool
 on:
   schedule:
     - cron: "30 5 * * 1"
-  workflow_dispatch:
 
 permissions:
   contents: write

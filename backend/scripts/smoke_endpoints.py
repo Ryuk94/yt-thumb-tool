@@ -99,7 +99,7 @@ def test_discover_cache() -> None:
 
     with (
         patch.object(main_module, "fetch_short_chart_videos", side_effect=fake_fetch_short_chart_videos),
-        patch.object(main_module, "analyze_thumbnail", return_value={"aspect_ratio": 1.78}),
+        patch.object(main_module, "analyze_thumbnail", return_value={"aspect_ratio": 0.56}),
         patch.object(main_module, "is_confirmed_short", return_value=False),
     ):
         payload_1 = main_module.discover(request, region="US", max_results=12)
