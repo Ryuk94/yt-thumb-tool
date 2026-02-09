@@ -547,6 +547,8 @@ export default function App() {
   const [patternError, setPatternError] = useState("");
   const [patternItems, setPatternItems] = useState([]);
   const [patternClusters, setPatternClusters] = useState([]);
+  const [appliedPatternItems, setAppliedPatternItems] = useState([]);
+  const [patternApplyingLive, setPatternApplyingLive] = useState(false);
   const [applyPatternId, setApplyPatternId] = useState("");
   const [activePattern, setActivePattern] = useState(null);
   const [comparePatternAId, setComparePatternAId] = useState("");
@@ -1046,6 +1048,10 @@ export default function App() {
     if (tab === "patterns") fetchSavedPatterns(true);
   }, [tab, fetchSavedPatterns]);
 
+  useEffect(() => {
+    setAppliedPatternItems([]);
+  }, [patternSource]);
+
   const patternSourceItems = useMemo(() => {
     if (patternSource === "trending") return items;
     if (patternSource === "profile") return profileItems;
@@ -1195,6 +1201,7 @@ export default function App() {
         updateGlobalLoading(loadingToken, "Loading pattern definition...", 74);
         setActivePattern(payload.pattern || null);
         setApplyPatternId(targetId);
+        setAppliedPatternItems([]);
       })
       .catch((err) => {
         setPatternError(err.message || "Failed to load pattern.");
@@ -1204,6 +1211,63 @@ export default function App() {
         endGlobalLoading(loadingToken);
       });
   }, [applyPatternId, fetchPatternById, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
+
+  const applyActivePatternToCurrentSource = useCallback(() => {
+    if (!activePattern) {
+      setPatternError("Load a saved pattern first.");
+      return;
+    }
+
+    const signatures = new Set(
+      (activePattern.clusters || [])
+        .map((cluster) => String(cluster.signature || "").trim())
+        .filter(Boolean)
+    );
+    if (!signatures.size) {
+      setPatternError("This pattern has no signatures to match.");
+      return;
+    }
+
+    const candidates = (patternSourceItems || [])
+      .map((item) => ({
+        thumbnail_url: item.thumbnail || item.thumbnail_url || "",
+        video_id: item.video_id || item.id || null,
+        title: item.title || null,
+        channel_title: item.channelTitle || item.channel_title || null,
+      }))
+      .filter((item) => !!item.thumbnail_url)
+      .slice(0, 80);
+    if (!candidates.length) {
+      setPatternError("No thumbnails available in this source yet.");
+      return;
+    }
+
+    setPatternApplyingLive(true);
+    setPatternError("");
+    const loadingToken = startGlobalLoading("Applying pattern to source...", 22);
+    fetch(apiUrl("/patterns/extract"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items: candidates }),
+    })
+      .then(async (r) => {
+        updateGlobalLoading(loadingToken, "Matching cluster signatures...", 76);
+        if (!r.ok) throw new Error(await readApiErrorDetail(r, "Failed to apply pattern."));
+        return r.json();
+      })
+      .then((payload) => {
+        const extractedItems = payload?.items || [];
+        const matched = extractedItems.filter((item) => signatures.has(String(item.cluster_signature || "").trim()));
+        setAppliedPatternItems(matched);
+      })
+      .catch((err) => {
+        setPatternError(err.message || "Failed to apply pattern.");
+      })
+      .finally(() => {
+        setPatternApplyingLive(false);
+        endGlobalLoading(loadingToken);
+      });
+  }, [activePattern, patternSourceItems, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
 
   const compareSavedPatterns = useCallback(() => {
     if (!isProUser) {
@@ -1921,6 +1985,16 @@ export default function App() {
                     Notes: {activePattern.notes}
                   </div>
                 )}
+                <div style={{ marginTop: 8, display: "flex", justifyContent: "center" }}>
+                  <button
+                    type="button"
+                    onClick={applyActivePatternToCurrentSource}
+                    disabled={patternApplyingLive}
+                    style={tabButtonStyle(false)}
+                  >
+                    {patternApplyingLive ? "Applying..." : "Apply to Current Source"}
+                  </button>
+                </div>
               </div>
             )}
 
@@ -1981,6 +2055,22 @@ export default function App() {
                 views: 0,
                 source_group: item.cluster_id,
               }))} />
+            )}
+
+            {!!appliedPatternItems.length && (
+              <>
+                <div style={{ ...infoBoxStyle, marginTop: 12, borderRadius: 10, padding: "10px 12px", textAlign: "center", fontSize: 12 }}>
+                  Pattern matches in current source: {appliedPatternItems.length}
+                </div>
+                <ThumbnailGrid items={appliedPatternItems.map((item) => ({
+                  id: item.video_id || item.thumbnail_url,
+                  title: item.title || "Matched Thumbnail",
+                  channelTitle: item.channel_title || item.features?.quality_band || "Match",
+                  thumbnail: item.thumbnail_url,
+                  views: 0,
+                  source_group: item.cluster_id,
+                }))} />
+              </>
             )}
           </>
         )}
