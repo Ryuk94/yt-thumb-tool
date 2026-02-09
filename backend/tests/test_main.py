@@ -418,6 +418,45 @@ def test_patterns_compare(monkeypatch, tmp_path):
     assert len(payload["rows"]) == 3
 
 
+def test_patterns_match(monkeypatch, tmp_path):
+    main_module.PATTERN_LIBRARY.clear()
+    monkeypatch.setattr(main_module, "PATTERN_LIBRARY_FILE", tmp_path / "pattern_library.json")
+    monkeypatch.setattr(
+        main_module,
+        "analyze_thumbnail",
+        lambda _url: {
+            "has_face": True,
+            "text_present": False,
+            "aspect_orientation": "portrait",
+            "quality_score": 82,
+            "clutter_score": 20,
+        },
+    )
+
+    created = main_module.save_pattern(
+        main_module.PatternSaveRequest(
+            name="portrait-face",
+            clusters=[{"cluster_id": "cluster_1", "signature": "ar:portrait|face:1|text:0|quality:high|clutter:clean", "count": 2}],
+            filters={},
+        ),
+        make_request(),
+    )
+    pattern_id = created["pattern_id"]
+    payload = main_module.match_pattern(
+        payload=main_module.PatternMatchRequest(
+            pattern_id=pattern_id,
+            items=[
+                main_module.PatternExtractItem(thumbnail_url="https://img/a.jpg", video_id="a"),
+                main_module.PatternExtractItem(thumbnail_url="https://img/b.jpg", video_id="b"),
+            ],
+        ),
+        request=make_request(),
+    )
+    assert payload["meta"]["input_count"] == 2
+    assert payload["meta"]["matched_count"] == 2
+    assert len(payload["matches"]) == 2
+
+
 def test_pattern_update(monkeypatch, tmp_path):
     main_module.PATTERN_LIBRARY.clear()
     monkeypatch.setattr(main_module, "PATTERN_LIBRARY_FILE", tmp_path / "pattern_library.json")

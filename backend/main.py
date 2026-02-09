@@ -166,6 +166,11 @@ class PatternUpdateRequest(BaseModel):
     notes: str | None = None
 
 
+class PatternMatchRequest(BaseModel):
+    pattern_id: str
+    items: list[PatternExtractItem] = Field(default_factory=list)
+
+
 class YouTubeQuotaExceededError(Exception):
     pass
 
@@ -1804,6 +1809,49 @@ def compare_patterns(pattern_a_id: str, pattern_b_id: str, request: Request):
             "overlap_ratio": round(overlap_ratio, 4),
         },
         "rows": rows,
+    }
+
+
+@app.post("/patterns/match")
+def match_pattern(payload: PatternMatchRequest, request: Request):
+    enforce_api_rate_limit(request, scope="patterns_match")
+    pattern_id = (payload.pattern_id or "").strip()
+    if not pattern_id:
+        raise HTTPException(status_code=400, detail="pattern_id is required")
+    if not payload.items:
+        raise HTTPException(status_code=400, detail="items must contain at least one thumbnail")
+
+    with PATTERN_LIBRARY_LOCK:
+        pattern = PATTERN_LIBRARY.get(pattern_id)
+    if not pattern:
+        raise HTTPException(status_code=404, detail="Pattern not found")
+
+    signatures = {
+        str(cluster.get("signature") or "").strip()
+        for cluster in (pattern.get("clusters") or [])
+        if str(cluster.get("signature") or "").strip()
+    }
+    if not signatures:
+        return {
+            "pattern_id": pattern_id,
+            "matches": [],
+            "meta": {
+                "input_count": len(payload.items),
+                "matched_count": 0,
+                "reason": "Pattern has no signatures",
+            },
+        }
+
+    enriched = [_extract_pattern_item(item) for item in payload.items]
+    matches = [item for item in enriched if str(item.get("cluster_signature") or "").strip() in signatures]
+    return {
+        "pattern_id": pattern_id,
+        "matches": matches,
+        "meta": {
+            "input_count": len(payload.items),
+            "matched_count": len(matches),
+            "signature_count": len(signatures),
+        },
     }
 
 

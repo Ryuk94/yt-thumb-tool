@@ -1217,14 +1217,9 @@ export default function App() {
       setPatternError("Load a saved pattern first.");
       return;
     }
-
-    const signatures = new Set(
-      (activePattern.clusters || [])
-        .map((cluster) => String(cluster.signature || "").trim())
-        .filter(Boolean)
-    );
-    if (!signatures.size) {
-      setPatternError("This pattern has no signatures to match.");
+    const patternId = String(activePattern.pattern_id || applyPatternId || "").trim();
+    if (!patternId) {
+      setPatternError("Active pattern is missing an ID.");
       return;
     }
 
@@ -1245,10 +1240,10 @@ export default function App() {
     setPatternApplyingLive(true);
     setPatternError("");
     const loadingToken = startGlobalLoading("Applying pattern to source...", 22);
-    fetch(apiUrl("/patterns/extract"), {
+    fetch(apiUrl("/patterns/match"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items: candidates }),
+      body: JSON.stringify({ pattern_id: patternId, items: candidates }),
     })
       .then(async (r) => {
         updateGlobalLoading(loadingToken, "Matching cluster signatures...", 76);
@@ -1256,9 +1251,7 @@ export default function App() {
         return r.json();
       })
       .then((payload) => {
-        const extractedItems = payload?.items || [];
-        const matched = extractedItems.filter((item) => signatures.has(String(item.cluster_signature || "").trim()));
-        setAppliedPatternItems(matched);
+        setAppliedPatternItems(payload?.matches || []);
       })
       .catch((err) => {
         setPatternError(err.message || "Failed to apply pattern.");
@@ -1267,7 +1260,7 @@ export default function App() {
         setPatternApplyingLive(false);
         endGlobalLoading(loadingToken);
       });
-  }, [activePattern, patternSourceItems, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
+  }, [activePattern, applyPatternId, patternSourceItems, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
 
   const compareSavedPatterns = useCallback(() => {
     if (!isProUser) {
