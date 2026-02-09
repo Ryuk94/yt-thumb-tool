@@ -571,6 +571,7 @@ export default function App() {
   const [patternLibraryOffset, setPatternLibraryOffset] = useState(0);
   const [patternPinnedOnly, setPatternPinnedOnly] = useState(false);
   const [patternLibraryMeta, setPatternLibraryMeta] = useState({ total: 0 });
+  const [selectedPatternIds, setSelectedPatternIds] = useState([]);
 
   const [darkMode, setDarkMode] = useState(() => readCookie("darkMode") === "1");
   const [globalLoading, setGlobalLoading] = useState({ active: false, message: "", progress: 0 });
@@ -691,6 +692,11 @@ export default function App() {
     if (!comparePatternAId) setComparePatternAId(savedPatterns[0].pattern_id);
     if (!comparePatternBId) setComparePatternBId(savedPatterns[Math.min(1, savedPatterns.length - 1)].pattern_id);
   }, [savedPatterns, comparePatternAId, comparePatternBId]);
+
+  useEffect(() => {
+    const visible = new Set(savedPatterns.map((pattern) => pattern.pattern_id));
+    setSelectedPatternIds((prev) => prev.filter((id) => visible.has(id)));
+  }, [savedPatterns]);
 
   const fetchSavedPatterns = useCallback((silent = false) => {
     if (!silent) setPatternError("");
@@ -1562,6 +1568,57 @@ export default function App() {
     showGlobalNotice,
   ]);
 
+  const togglePatternSelection = useCallback((patternId) => {
+    const targetId = String(patternId || "").trim();
+    if (!targetId) return;
+    setSelectedPatternIds((prev) =>
+      prev.includes(targetId) ? prev.filter((id) => id !== targetId) : [...prev, targetId]
+    );
+  }, []);
+
+  const bulkDeleteSelectedPatterns = useCallback(() => {
+    if (!isProUser) {
+      setPatternError("Pattern management is a Pro feature.");
+      setPricingOpen(true);
+      return;
+    }
+    if (!selectedPatternIds.length) {
+      setPatternError("Select at least one pattern to bulk delete.");
+      return;
+    }
+    const loadingToken = startGlobalLoading("Bulk deleting patterns...", 24);
+    setPatternError("");
+    fetch(apiUrl("/patterns/bulk-delete"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pattern_ids: selectedPatternIds }),
+    })
+      .then(async (r) => {
+        updateGlobalLoading(loadingToken, "Updating library...", 80);
+        if (!r.ok) throw new Error(await readApiErrorDetail(r, "Failed to bulk delete patterns."));
+        return r.json();
+      })
+      .then((payload) => {
+        const removed = Number(payload?.removed || 0);
+        setSavedPatterns((prev) => prev.filter((pattern) => !selectedPatternIds.includes(pattern.pattern_id)));
+        setSelectedPatternIds([]);
+        fetchSavedPatterns(true);
+        showGlobalNotice(`Removed ${removed} pattern${removed === 1 ? "" : "s"}.`, "info", 2200);
+      })
+      .catch((err) => {
+        setPatternError(err.message || "Failed to bulk delete patterns.");
+      })
+      .finally(() => endGlobalLoading(loadingToken));
+  }, [
+    isProUser,
+    selectedPatternIds,
+    startGlobalLoading,
+    updateGlobalLoading,
+    endGlobalLoading,
+    fetchSavedPatterns,
+    showGlobalNotice,
+  ]);
+
   const exportPatternLibrary = useCallback(() => {
     if (!isProUser) {
       setPatternError("Pattern export is a Pro feature.");
@@ -2158,6 +2215,16 @@ export default function App() {
                 Saved patterns: {patternLibraryMeta.total}
               </div>
             )}
+            {!!selectedPatternIds.length && (
+              <div style={{ marginTop: 8, display: "flex", gap: 8, justifyContent: "center" }}>
+                <button type="button" onClick={bulkDeleteSelectedPatterns} style={tabButtonStyle(false)}>
+                  Delete Selected ({selectedPatternIds.length})
+                </button>
+                <button type="button" onClick={() => setSelectedPatternIds([])} style={tabButtonStyle(false)}>
+                  Clear Selection
+                </button>
+              </div>
+            )}
             {patternLibraryMeta?.total != null && (
               <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center", justifyContent: "center" }}>
                 <button
@@ -2196,6 +2263,18 @@ export default function App() {
                     >
                       {pattern.pinned ? "★ " : ""}
                       {pattern.name}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`${selectedPatternIds.includes(pattern.pattern_id) ? "Unselect" : "Select"} ${pattern.name}`}
+                      onClick={() => togglePatternSelection(pattern.pattern_id)}
+                      style={{
+                        ...tabButtonStyle(selectedPatternIds.includes(pattern.pattern_id)),
+                        minWidth: 40,
+                        padding: "8px 10px",
+                      }}
+                    >
+                      Sel
                     </button>
                     <button
                       type="button"

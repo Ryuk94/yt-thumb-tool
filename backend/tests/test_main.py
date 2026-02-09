@@ -576,3 +576,22 @@ def test_pattern_clone(monkeypatch, tmp_path):
     assert clone["pattern_id"] != source_id
     assert clone["pattern"]["name"].endswith("(Copy)")
     assert clone["pattern"]["clusters"] == created["pattern"]["clusters"]
+
+
+def test_pattern_bulk_delete(monkeypatch, tmp_path):
+    main_module.PATTERN_LIBRARY.clear()
+    monkeypatch.setattr(main_module, "PATTERN_LIBRARY_FILE", tmp_path / "pattern_library.json")
+    a = main_module.save_pattern(main_module.PatternSaveRequest(name="A", clusters=[], filters={}), make_request())
+    b = main_module.save_pattern(main_module.PatternSaveRequest(name="B", clusters=[], filters={}), make_request())
+    c = main_module.save_pattern(main_module.PatternSaveRequest(name="C", clusters=[], filters={}), make_request())
+
+    result = main_module.bulk_delete_patterns(
+        main_module.PatternBulkDeleteRequest(pattern_ids=[a["pattern_id"], c["pattern_id"], "missing"]),
+        make_request(),
+    )
+    assert result["ok"] is True
+    assert result["requested"] == 3
+    assert result["removed"] == 2
+    listed = main_module.list_patterns(make_request())
+    assert len(listed["items"]) == 1
+    assert listed["items"][0]["pattern_id"] == b["pattern_id"]

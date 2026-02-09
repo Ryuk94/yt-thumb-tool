@@ -177,6 +177,10 @@ class PatternImportRequest(BaseModel):
     strategy: str = "skip"  # skip | overwrite
 
 
+class PatternBulkDeleteRequest(BaseModel):
+    pattern_ids: list[str] = Field(default_factory=list)
+
+
 class YouTubeQuotaExceededError(Exception):
     pass
 
@@ -2059,6 +2063,28 @@ def clone_pattern(pattern_id: str, request: Request):
 
     persist_pattern_library(snapshot)
     return {"ok": True, "pattern_id": clone_id, "pattern": clone}
+
+
+@app.post("/patterns/bulk-delete")
+def bulk_delete_patterns(payload: PatternBulkDeleteRequest, request: Request):
+    enforce_api_rate_limit(request, scope="patterns_bulk_delete")
+    ids = [str(pid).strip() for pid in (payload.pattern_ids or []) if str(pid).strip()]
+    if not ids:
+        raise HTTPException(status_code=400, detail="pattern_ids must contain at least one id")
+
+    removed = 0
+    with PATTERN_LIBRARY_LOCK:
+        for pid in ids:
+            if PATTERN_LIBRARY.pop(pid, None) is not None:
+                removed += 1
+        snapshot = dict(PATTERN_LIBRARY)
+    persist_pattern_library(snapshot)
+    return {
+        "ok": True,
+        "requested": len(ids),
+        "removed": removed,
+        "remaining": len(snapshot),
+    }
 
 
 @app.get("/top")
