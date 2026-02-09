@@ -377,3 +377,42 @@ def test_patterns_extract_save_apply(monkeypatch, tmp_path):
     assert deleted["pattern_id"] == pattern_id
     listed_after_delete = main_module.list_patterns(make_request())
     assert all(item["pattern_id"] != pattern_id for item in listed_after_delete["items"])
+
+
+def test_patterns_compare(monkeypatch, tmp_path):
+    main_module.PATTERN_LIBRARY.clear()
+    monkeypatch.setattr(main_module, "PATTERN_LIBRARY_FILE", tmp_path / "pattern_library.json")
+
+    save_a = main_module.save_pattern(
+        main_module.PatternSaveRequest(
+            name="A",
+            clusters=[
+                {"cluster_id": "cluster_1", "signature": "sig:face", "count": 3},
+                {"cluster_id": "cluster_2", "signature": "sig:text", "count": 2},
+            ],
+            filters={},
+        ),
+        make_request(),
+    )
+    save_b = main_module.save_pattern(
+        main_module.PatternSaveRequest(
+            name="B",
+            clusters=[
+                {"cluster_id": "cluster_1", "signature": "sig:face", "count": 1},
+                {"cluster_id": "cluster_9", "signature": "sig:clean", "count": 4},
+            ],
+            filters={},
+        ),
+        make_request(),
+    )
+
+    payload = main_module.compare_patterns(
+        pattern_a_id=save_a["pattern_id"],
+        pattern_b_id=save_b["pattern_id"],
+        request=make_request(),
+    )
+    assert payload["pattern_a"]["name"] == "A"
+    assert payload["pattern_b"]["name"] == "B"
+    assert payload["summary"]["union_signatures"] == 3
+    assert payload["summary"]["overlap_signatures"] == 1
+    assert len(payload["rows"]) == 3

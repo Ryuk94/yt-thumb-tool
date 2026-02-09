@@ -1737,6 +1737,69 @@ def apply_pattern(pattern_id: str, request: Request):
     return {"pattern_id": pattern_id, "pattern": pattern}
 
 
+@app.get("/patterns/compare")
+def compare_patterns(pattern_a_id: str, pattern_b_id: str, request: Request):
+    enforce_api_rate_limit(request, scope="patterns_compare")
+    with PATTERN_LIBRARY_LOCK:
+        pattern_a = PATTERN_LIBRARY.get(pattern_a_id)
+        pattern_b = PATTERN_LIBRARY.get(pattern_b_id)
+
+    if not pattern_a or not pattern_b:
+        raise HTTPException(status_code=404, detail="One or both patterns were not found")
+
+    def to_signature_map(pattern: dict[str, Any]) -> dict[str, int]:
+        rows = pattern.get("clusters") or []
+        out: dict[str, int] = {}
+        for cluster in rows:
+            signature = str(cluster.get("signature") or cluster.get("cluster_id") or "").strip()
+            if not signature:
+                continue
+            out[signature] = int(cluster.get("count") or 0)
+        return out
+
+    left_map = to_signature_map(pattern_a)
+    right_map = to_signature_map(pattern_b)
+    signatures = sorted(set(left_map.keys()) | set(right_map.keys()))
+
+    rows: list[dict[str, Any]] = []
+    overlap_count = 0
+    for signature in signatures:
+        left_count = int(left_map.get(signature, 0))
+        right_count = int(right_map.get(signature, 0))
+        if left_count > 0 and right_count > 0:
+            overlap_count += 1
+        rows.append(
+            {
+                "signature": signature,
+                "left_count": left_count,
+                "right_count": right_count,
+                "delta": left_count - right_count,
+            }
+        )
+    rows.sort(key=lambda row: abs(int(row.get("delta") or 0)), reverse=True)
+
+    union_count = len(signatures)
+    overlap_ratio = float(overlap_count) / float(union_count) if union_count else 0.0
+    return {
+        "pattern_a": {
+            "pattern_id": pattern_a.get("pattern_id"),
+            "name": pattern_a.get("name"),
+            "cluster_count": len(pattern_a.get("clusters") or []),
+        },
+        "pattern_b": {
+            "pattern_id": pattern_b.get("pattern_id"),
+            "name": pattern_b.get("name"),
+            "cluster_count": len(pattern_b.get("clusters") or []),
+        },
+        "summary": {
+            "overlap_signatures": overlap_count,
+            "union_signatures": union_count,
+            "overlap_ratio": round(overlap_ratio, 4),
+        },
+        "rows": rows,
+    }
+
+
 @app.delete("/patterns/{pattern_id}")
 def delete_pattern(pattern_id: str, request: Request):
     enforce_api_rate_limit(request, scope="patterns_delete")

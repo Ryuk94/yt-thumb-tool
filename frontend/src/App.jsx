@@ -545,6 +545,7 @@ export default function App() {
   const [comparePatternBId, setComparePatternBId] = useState("");
   const [comparePatternA, setComparePatternA] = useState(null);
   const [comparePatternB, setComparePatternB] = useState(null);
+  const [compareResult, setCompareResult] = useState(null);
   const [patternComparing, setPatternComparing] = useState(false);
   const [savedPatterns, setSavedPatterns] = useState(() => {
     try {
@@ -1217,6 +1218,16 @@ export default function App() {
         updateGlobalLoading(loadingToken, "Mapping cluster overlap...", 78);
         setComparePatternA(left.pattern || null);
         setComparePatternB(right.pattern || null);
+        return fetch(
+          `${apiUrl("/patterns/compare")}?pattern_a_id=${encodeURIComponent(idA)}&pattern_b_id=${encodeURIComponent(idB)}`
+        );
+      })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(await readApiErrorDetail(response, "Failed to compare patterns."));
+        return response.json();
+      })
+      .then((payload) => {
+        setCompareResult(payload);
       })
       .catch((err) => {
         setPatternError(err.message || "Failed to compare patterns.");
@@ -1250,6 +1261,9 @@ export default function App() {
         if (applyPatternId === targetId) setApplyPatternId("");
         if (comparePatternAId === targetId) setComparePatternAId("");
         if (comparePatternBId === targetId) setComparePatternBId("");
+        if (compareResult && (compareResult.pattern_a?.pattern_id === targetId || compareResult.pattern_b?.pattern_id === targetId)) {
+          setCompareResult(null);
+        }
         if (activePattern?.pattern_id === targetId) setActivePattern(null);
         fetchSavedPatterns(true);
       })
@@ -1262,6 +1276,7 @@ export default function App() {
     applyPatternId,
     comparePatternAId,
     comparePatternBId,
+    compareResult,
     activePattern,
     startGlobalLoading,
     updateGlobalLoading,
@@ -1325,19 +1340,7 @@ export default function App() {
     cursor: "pointer",
   };
 
-  const compareRows = useMemo(() => {
-    const left = comparePatternA?.clusters || [];
-    const right = comparePatternB?.clusters || [];
-    const leftMap = new Map(left.map((cluster) => [String(cluster.signature || cluster.cluster_id || ""), Number(cluster.count || 0)]));
-    const rightMap = new Map(right.map((cluster) => [String(cluster.signature || cluster.cluster_id || ""), Number(cluster.count || 0)]));
-    const allKeys = Array.from(new Set([...leftMap.keys(), ...rightMap.keys()])).filter(Boolean);
-    return allKeys.map((signature) => ({
-      signature,
-      leftCount: leftMap.get(signature) || 0,
-      rightCount: rightMap.get(signature) || 0,
-      delta: (leftMap.get(signature) || 0) - (rightMap.get(signature) || 0),
-    }));
-  }, [comparePatternA, comparePatternB]);
+  const compareRows = useMemo(() => compareResult?.rows || [], [compareResult]);
 
   return (
     <div
@@ -1747,6 +1750,12 @@ export default function App() {
                 <div style={{ fontWeight: 700, fontSize: 13, textAlign: "center" }}>
                   Compare: {comparePatternA.name || "Pattern A"} vs {comparePatternB.name || "Pattern B"}
                 </div>
+                {compareResult?.summary && (
+                  <div style={{ marginTop: 6, fontSize: 12, textAlign: "center" }}>
+                    Overlap: {compareResult.summary.overlap_signatures}/{compareResult.summary.union_signatures} signatures (
+                    {(Number(compareResult.summary.overlap_ratio || 0) * 100).toFixed(0)}%)
+                  </div>
+                )}
                 <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
                   {compareRows.length ? compareRows.map((row) => (
                     <div
@@ -1762,8 +1771,8 @@ export default function App() {
                       <span style={{ textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {row.signature}
                       </span>
-                      <span>A: {row.leftCount}</span>
-                      <span>B: {row.rightCount}</span>
+                      <span>A: {row.left_count}</span>
+                      <span>B: {row.right_count}</span>
                       <span style={{ color: row.delta > 0 ? "#0b8f3a" : row.delta < 0 ? "#b00020" : undefined }}>
                         Δ {row.delta}
                       </span>
