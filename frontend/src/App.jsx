@@ -184,6 +184,8 @@ function RoundedDropdown({ value, options, onChange, darkMode, minWidth = 96 }) 
 }
 
 function ThumbnailGrid({ items, portraitMode = false, showMetrics = false }) {
+  const [hoveredGroup, setHoveredGroup] = useState(null);
+
   return (
     <div
       style={{
@@ -204,6 +206,11 @@ function ThumbnailGrid({ items, portraitMode = false, showMetrics = false }) {
         const qualityScore = v.thumb_insights?.quality_score;
         const aspectRatio = v.thumb_insights?.aspect_ratio ?? v.thumbnail_aspect_ratio;
 
+        const groupId = v.source_group || null;
+        const isGrouped = !!groupId && !!hoveredGroup;
+        const isGroupMatch = isGrouped && groupId === hoveredGroup;
+        const isGroupDimmed = isGrouped && !isGroupMatch;
+
         return (
           <button
             className="thumb-card"
@@ -212,7 +219,7 @@ function ThumbnailGrid({ items, portraitMode = false, showMetrics = false }) {
             style={{
               textDecoration: "none",
               color: "#111",
-              border: "1px solid #ddd",
+              border: isGroupMatch ? "1px solid rgba(209, 48, 49, 0.55)" : "1px solid #ddd",
               borderRadius: 12,
               overflow: "hidden",
               background: "#fff",
@@ -220,6 +227,9 @@ function ThumbnailGrid({ items, portraitMode = false, showMetrics = false }) {
               padding: 0,
               cursor: "pointer",
               textAlign: "left",
+              opacity: isGroupDimmed ? 0.48 : 1,
+              filter: isGroupDimmed ? "saturate(0.72)" : "none",
+              boxShadow: isGroupMatch ? "0 0 0 2px rgba(209,48,49,0.18)" : "none",
             }}
             onClick={() => {
               window.dispatchEvent(
@@ -241,6 +251,7 @@ function ThumbnailGrid({ items, portraitMode = false, showMetrics = false }) {
               );
             }}
             onMouseEnter={() => {
+              setHoveredGroup(groupId);
               window.dispatchEvent(
                 new CustomEvent("thumbnail-hovered", {
                   detail: {
@@ -251,6 +262,7 @@ function ThumbnailGrid({ items, portraitMode = false, showMetrics = false }) {
                 })
               );
             }}
+            onMouseLeave={() => setHoveredGroup(null)}
           >
             {portraitMode ? (
               <div style={{ width: "100%", aspectRatio: "9 / 16", background: "#111" }}>
