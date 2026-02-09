@@ -556,3 +556,23 @@ def test_pattern_export_import(monkeypatch, tmp_path):
     assert imported["total_library"] == 1
     listed = main_module.list_patterns(make_request())
     assert listed["items"][0]["name"] == "Export Me"
+
+
+def test_pattern_clone(monkeypatch, tmp_path):
+    main_module.PATTERN_LIBRARY.clear()
+    monkeypatch.setattr(main_module, "PATTERN_LIBRARY_FILE", tmp_path / "pattern_library.json")
+    created = main_module.save_pattern(
+        main_module.PatternSaveRequest(
+            name="Base Pattern",
+            clusters=[{"cluster_id": "cluster_1", "signature": "sig:x", "count": 1}],
+            filters={"source": "winners"},
+            notes="seed",
+        ),
+        make_request(),
+    )
+    source_id = created["pattern_id"]
+    clone = main_module.clone_pattern(source_id, make_request())
+    assert clone["ok"] is True
+    assert clone["pattern_id"] != source_id
+    assert clone["pattern"]["name"].endswith("(Copy)")
+    assert clone["pattern"]["clusters"] == created["pattern"]["clusters"]

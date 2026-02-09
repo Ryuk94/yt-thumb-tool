@@ -2034,6 +2034,33 @@ def update_pattern(pattern_id: str, payload: PatternUpdateRequest, request: Requ
     return {"ok": True, "pattern_id": pattern_id, "pattern": updated}
 
 
+@app.post("/patterns/{pattern_id}/clone")
+def clone_pattern(pattern_id: str, request: Request):
+    enforce_api_rate_limit(request, scope="patterns_clone")
+    with PATTERN_LIBRARY_LOCK:
+        source = PATTERN_LIBRARY.get(pattern_id)
+        if not source:
+            raise HTTPException(status_code=404, detail="Pattern not found")
+
+        clone_id = uuid.uuid4().hex[:12]
+        source_name = str(source.get("name") or "Pattern").strip() or "Pattern"
+        clone = {
+            "pattern_id": clone_id,
+            "name": f"{source_name} (Copy)",
+            "clusters": list(source.get("clusters") or []),
+            "filters": dict(source.get("filters") or {}),
+            "notes": source.get("notes"),
+            "pinned": bool(source.get("pinned")),
+            "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }
+        PATTERN_LIBRARY[clone_id] = clone
+        snapshot = dict(PATTERN_LIBRARY)
+
+    persist_pattern_library(snapshot)
+    return {"ok": True, "pattern_id": clone_id, "pattern": clone}
+
+
 @app.get("/top")
 def top(
     request: Request,

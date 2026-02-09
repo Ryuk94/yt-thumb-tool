@@ -1525,6 +1525,43 @@ export default function App() {
     fetchSavedPatterns,
   ]);
 
+  const cloneSavedPattern = useCallback((patternId) => {
+    if (!isProUser) {
+      setPatternError("Pattern management is a Pro feature.");
+      setPricingOpen(true);
+      return;
+    }
+    const targetId = String(patternId || "").trim();
+    if (!targetId) return;
+    setPatternError("");
+    const loadingToken = startGlobalLoading("Cloning pattern...", 24);
+    fetch(apiUrl(`/patterns/${encodeURIComponent(targetId)}/clone`), {
+      method: "POST",
+    })
+      .then(async (r) => {
+        updateGlobalLoading(loadingToken, "Adding copy to library...", 80);
+        if (!r.ok) throw new Error(await readApiErrorDetail(r, "Failed to clone pattern."));
+        return r.json();
+      })
+      .then((payload) => {
+        const cloneId = payload?.pattern_id || "";
+        if (cloneId) setApplyPatternId(cloneId);
+        fetchSavedPatterns(true);
+        showGlobalNotice("Pattern duplicated.", "info", 2200);
+      })
+      .catch((err) => {
+        setPatternError(err.message || "Failed to clone pattern.");
+      })
+      .finally(() => endGlobalLoading(loadingToken));
+  }, [
+    isProUser,
+    startGlobalLoading,
+    updateGlobalLoading,
+    endGlobalLoading,
+    fetchSavedPatterns,
+    showGlobalNotice,
+  ]);
+
   const exportPatternLibrary = useCallback(() => {
     if (!isProUser) {
       setPatternError("Pattern export is a Pro feature.");
@@ -2186,6 +2223,18 @@ export default function App() {
                     </button>
                     <button
                       type="button"
+                      aria-label={`Duplicate ${pattern.name}`}
+                      onClick={() => cloneSavedPattern(pattern.pattern_id)}
+                      style={{
+                        ...tabButtonStyle(false),
+                        minWidth: 36,
+                        padding: "8px 10px",
+                      }}
+                    >
+                      Dup
+                    </button>
+                    <button
+                      type="button"
                       aria-label={`Edit notes for ${pattern.name}`}
                       onClick={() => editPatternNotes(pattern)}
                       style={{
@@ -2253,6 +2302,13 @@ export default function App() {
                     style={tabButtonStyle(false)}
                   >
                     {patternApplyingLive ? "Applying..." : "Apply to Current Source"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => cloneSavedPattern(activePattern.pattern_id)}
+                    style={{ ...tabButtonStyle(false), marginLeft: 8 }}
+                  >
+                    Duplicate Pattern
                   </button>
                 </div>
               </div>
