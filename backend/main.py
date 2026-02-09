@@ -164,6 +164,7 @@ class PatternSaveRequest(BaseModel):
 class PatternUpdateRequest(BaseModel):
     name: str | None = None
     notes: str | None = None
+    pinned: bool | None = None
 
 
 class PatternMatchRequest(BaseModel):
@@ -1705,6 +1706,7 @@ def save_pattern(payload: PatternSaveRequest, request: Request):
         "clusters": payload.clusters,
         "filters": payload.filters,
         "notes": payload.notes,
+        "pinned": False,
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
     with PATTERN_LIBRARY_LOCK:
@@ -1722,14 +1724,15 @@ def save_pattern(payload: PatternSaveRequest, request: Request):
 def list_patterns(
     request: Request,
     query: str | None = None,
-    sort: str = "recent",  # recent | oldest | name
+    sort: str = "recent",  # recent | oldest | name | pinned_recent
+    pinned_only: int = 0,
     limit: int = 100,
     offset: int = 0,
 ):
     enforce_api_rate_limit(request, scope="patterns_list")
     sort_mode = (sort or "recent").lower()
-    if sort_mode not in {"recent", "oldest", "name"}:
-        raise HTTPException(status_code=400, detail="sort must be one of: recent, oldest, name")
+    if sort_mode not in {"recent", "oldest", "name", "pinned_recent"}:
+        raise HTTPException(status_code=400, detail="sort must be one of: recent, oldest, name, pinned_recent")
     limit = max(1, min(limit, 500))
     offset = max(0, offset)
     needle = (query or "").strip().lower()
@@ -1744,10 +1747,20 @@ def list_patterns(
             return needle in name or needle in notes
         patterns = [pattern for pattern in patterns if _matches(pattern)]
 
+    if pinned_only:
+        patterns = [pattern for pattern in patterns if bool(pattern.get("pinned"))]
+
     if sort_mode == "name":
         patterns.sort(key=lambda item: str(item.get("name") or "").lower())
     elif sort_mode == "oldest":
         patterns.sort(key=lambda item: str(item.get("created_at") or ""), reverse=False)
+    elif sort_mode == "pinned_recent":
+        patterns.sort(
+            key=lambda item: (
+                0 if bool(item.get("pinned")) else 1,
+                str(item.get("created_at") or ""),
+            )
+        )
     else:
         patterns.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
 
@@ -1760,6 +1773,7 @@ def list_patterns(
             "created_at": pattern.get("created_at"),
             "updated_at": pattern.get("updated_at"),
             "notes": pattern.get("notes"),
+            "pinned": bool(pattern.get("pinned")),
             "cluster_count": len(pattern.get("clusters") or []),
         }
         for pattern in sliced
@@ -1770,6 +1784,7 @@ def list_patterns(
             "total": total,
             "query": query or "",
             "sort": sort_mode,
+            "pinned_only": int(1 if pinned_only else 0),
             "limit": limit,
             "offset": offset,
         },
@@ -1920,6 +1935,8 @@ def update_pattern(pattern_id: str, payload: PatternUpdateRequest, request: Requ
             updated["name"] = name
         if payload.notes is not None:
             updated["notes"] = payload.notes.strip() or None
+        if payload.pinned is not None:
+            updated["pinned"] = bool(payload.pinned)
         updated["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         PATTERN_LIBRARY[pattern_id] = updated
         snapshot = dict(PATTERN_LIBRARY)

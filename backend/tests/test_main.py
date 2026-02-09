@@ -472,15 +472,17 @@ def test_pattern_update(monkeypatch, tmp_path):
 
     updated = main_module.update_pattern(
         pattern_id=pattern_id,
-        payload=main_module.PatternUpdateRequest(name="renamed", notes="note"),
+        payload=main_module.PatternUpdateRequest(name="renamed", notes="note", pinned=True),
         request=make_request(),
     )
     assert updated["ok"] is True
     assert updated["pattern"]["name"] == "renamed"
     assert updated["pattern"]["notes"] == "note"
+    assert updated["pattern"]["pinned"] is True
     assert updated["pattern"].get("updated_at")
     listed = main_module.list_patterns(make_request())
     assert listed["items"][0]["notes"] == "note"
+    assert listed["items"][0]["pinned"] is True
 
 
 def test_pattern_list_query_sort(monkeypatch, tmp_path):
@@ -511,3 +513,12 @@ def test_pattern_list_query_sort(monkeypatch, tmp_path):
 
     named = main_module.list_patterns(make_request(), sort="name", limit=10, offset=0)
     assert named["items"][0]["name"] == "Alpha Pattern"
+
+    pinned_only = main_module.list_patterns(make_request(), sort="pinned_recent", pinned_only=1, limit=10, offset=0)
+    assert pinned_only["meta"]["pinned_only"] == 1
+    assert pinned_only["items"] == []
+
+    first_id = named["items"][0]["pattern_id"]
+    main_module.update_pattern(first_id, main_module.PatternUpdateRequest(pinned=True), make_request())
+    pinned_only_after = main_module.list_patterns(make_request(), sort="pinned_recent", pinned_only=1, limit=10, offset=0)
+    assert len(pinned_only_after["items"]) == 1

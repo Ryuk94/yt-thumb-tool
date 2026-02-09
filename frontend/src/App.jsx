@@ -569,6 +569,7 @@ export default function App() {
   const [patternLibrarySort, setPatternLibrarySort] = useState("recent");
   const [patternLibraryLimit, setPatternLibraryLimit] = useState(100);
   const [patternLibraryOffset, setPatternLibraryOffset] = useState(0);
+  const [patternPinnedOnly, setPatternPinnedOnly] = useState(false);
   const [patternLibraryMeta, setPatternLibraryMeta] = useState({ total: 0 });
 
   const [darkMode, setDarkMode] = useState(() => readCookie("darkMode") === "1");
@@ -695,6 +696,7 @@ export default function App() {
     const params = new URLSearchParams({
       query: patternLibraryQuery,
       sort: patternLibrarySort,
+      pinned_only: patternPinnedOnly ? "1" : "0",
       limit: String(patternLibraryLimit),
       offset: String(patternLibraryOffset),
     });
@@ -715,7 +717,7 @@ export default function App() {
       .catch((err) => {
         if (!silent) setPatternError(err.message || "Failed to load saved patterns.");
       });
-  }, [patternLibraryQuery, patternLibrarySort, patternLibraryLimit, patternLibraryOffset]);
+  }, [patternLibraryQuery, patternLibrarySort, patternPinnedOnly, patternLibraryLimit, patternLibraryOffset]);
 
   useEffect(() => {
     const onOpenPreview = (event) => {
@@ -1064,11 +1066,11 @@ export default function App() {
     if (tab !== "patterns") return;
     const timeout = window.setTimeout(() => fetchSavedPatterns(true), 180);
     return () => window.clearTimeout(timeout);
-  }, [tab, patternLibraryQuery, patternLibrarySort, patternLibraryLimit, patternLibraryOffset, fetchSavedPatterns]);
+  }, [tab, patternLibraryQuery, patternLibrarySort, patternPinnedOnly, patternLibraryLimit, patternLibraryOffset, fetchSavedPatterns]);
 
   useEffect(() => {
     setPatternLibraryOffset(0);
-  }, [patternLibraryQuery, patternLibrarySort, patternLibraryLimit]);
+  }, [patternLibraryQuery, patternLibrarySort, patternPinnedOnly, patternLibraryLimit]);
 
   useEffect(() => {
     setAppliedPatternItems([]);
@@ -1476,6 +1478,52 @@ export default function App() {
     fetchSavedPatterns,
   ]);
 
+  const togglePinnedPattern = useCallback((pattern) => {
+    if (!isProUser) {
+      setPatternError("Pattern management is a Pro feature.");
+      setPricingOpen(true);
+      return;
+    }
+    const patternId = String(pattern?.pattern_id || "").trim();
+    if (!patternId) return;
+    const nextPinned = !Boolean(pattern?.pinned);
+    const loadingToken = startGlobalLoading(nextPinned ? "Pinning pattern..." : "Unpinning pattern...", 24);
+    setPatternError("");
+    fetch(apiUrl(`/patterns/${encodeURIComponent(patternId)}`), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pinned: nextPinned }),
+    })
+      .then(async (r) => {
+        updateGlobalLoading(loadingToken, "Updating library ranking...", 76);
+        if (!r.ok) throw new Error(await readApiErrorDetail(r, "Failed to update pin state."));
+        return r.json();
+      })
+      .then((payload) => {
+        const updatedPinned = Boolean(payload?.pattern?.pinned ?? nextPinned);
+        setSavedPatterns((prev) =>
+          prev.map((entry) =>
+            entry.pattern_id === patternId ? { ...entry, pinned: updatedPinned } : entry
+          )
+        );
+        if (activePattern?.pattern_id === patternId) {
+          setActivePattern((prev) => (prev ? { ...prev, pinned: updatedPinned } : prev));
+        }
+        fetchSavedPatterns(true);
+      })
+      .catch((err) => {
+        setPatternError(err.message || "Failed to update pin state.");
+      })
+      .finally(() => endGlobalLoading(loadingToken));
+  }, [
+    isProUser,
+    activePattern,
+    startGlobalLoading,
+    updateGlobalLoading,
+    endGlobalLoading,
+    fetchSavedPatterns,
+  ]);
+
   const onProfileKeyDown = (e) => {
     if (e.key === "Enter") fetchProfile(true);
   };
@@ -1857,6 +1905,7 @@ export default function App() {
                   { value: "recent", label: "Recent" },
                   { value: "oldest", label: "Oldest" },
                   { value: "name", label: "Name" },
+                  { value: "pinned_recent", label: "Pinned" },
                 ]}
               />
               <RoundedDropdown
@@ -1871,6 +1920,13 @@ export default function App() {
                   { value: 250, label: "250" },
                 ]}
               />
+              <button
+                type="button"
+                onClick={() => setPatternPinnedOnly((prev) => !prev)}
+                style={tabButtonStyle(patternPinnedOnly)}
+              >
+                {patternPinnedOnly ? "Pinned Only" : "All Patterns"}
+              </button>
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "center" }}>
               <RoundedDropdown
@@ -1988,7 +2044,20 @@ export default function App() {
                       onClick={() => applySavedPattern(pattern.pattern_id)}
                       style={tabButtonStyle(false)}
                     >
+                      {pattern.pinned ? "★ " : ""}
                       {pattern.name}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`${pattern.pinned ? "Unpin" : "Pin"} ${pattern.name}`}
+                      onClick={() => togglePinnedPattern(pattern)}
+                      style={{
+                        ...tabButtonStyle(false),
+                        minWidth: 36,
+                        padding: "8px 10px",
+                      }}
+                    >
+                      {pattern.pinned ? "★" : "☆"}
                     </button>
                     <button
                       type="button"
