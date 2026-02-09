@@ -59,6 +59,7 @@ REGION_LANG = {
     "CA": "en",
     "AU": "en",
 }
+TRENDING_REGIONS = ["AU", "CA", "GB", "US"]
 
 
 def lang_for_region(region: str) -> str:
@@ -622,11 +623,14 @@ def matches_winners_type(candidate: dict, selected_type: str) -> bool:
         if aspect_ratio is not None:
             if aspect_ratio <= SHORTS_ASPECT_RATIO_MAX:
                 return True
-            return get_short_confirmed()
+        if bool(candidate.get("is_short")):
+            return True
         return get_short_confirmed()
 
     # videos
     if aspect_ratio is not None and aspect_ratio <= SHORTS_ASPECT_RATIO_MAX:
+        return False
+    if bool(candidate.get("is_short")):
         return False
     if get_short_confirmed():
         return False
@@ -707,6 +711,20 @@ def hydrate_video_metadata(video_ids: list[str]) -> list[dict]:
 
 
 def fetch_short_chart_videos(region: str, category_id: str | None, max_pages: int = 1) -> tuple[list[dict], int]:
+    region = (region or "US").upper()
+    if region == "GLOBAL":
+        merged: list[dict] = []
+        seen_ids: set[str] = set()
+        for one_region in TRENDING_REGIONS:
+            regional_items, _ = fetch_short_chart_videos(one_region, category_id, max_pages=1)
+            for item in regional_items:
+                vid = item.get("id")
+                if not vid or vid in seen_ids:
+                    continue
+                seen_ids.add(vid)
+                merged.append(item)
+        return merged, 1
+
     collected = []
     page_token = None
     pages_loaded = 0
@@ -888,6 +906,22 @@ def apply_quality_filter(
 
 
 def fetch_global_winner_videos(region: str, category_id: str | None, max_pages: int = 1) -> tuple[list[dict], int]:
+    region = (region or "US").upper()
+    if region == "GLOBAL":
+        merged: list[dict] = []
+        seen_ids: set[str] = set()
+        pages_loaded = 0
+        for one_region in TRENDING_REGIONS:
+            items, pages = fetch_global_winner_videos(one_region, category_id, max_pages=max_pages)
+            pages_loaded = max(pages_loaded, pages)
+            for item in items:
+                vid = item.get("id")
+                if not vid or vid in seen_ids:
+                    continue
+                seen_ids.add(vid)
+                merged.append(item)
+        return merged, pages_loaded or 1
+
     all_items: list[dict] = []
     page_token = None
     pages_loaded = 0
@@ -978,12 +1012,26 @@ YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 if not YOUTUBE_API_KEY:
     raise RuntimeError("Missing YOUTUBE_API_KEY in backend/.env")
 
+
+def parse_cors_origins() -> tuple[list[str], bool]:
+    raw = (os.getenv("CORS_ALLOWED_ORIGINS") or "").strip()
+    if not raw:
+        return ["http://localhost:5173"], True
+    if raw == "*":
+        return ["*"], False
+    origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+    if not origins:
+        return ["http://localhost:5173"], True
+    return origins, True
+
 app = FastAPI()
+
+cors_origins, cors_credentials = parse_cors_origins()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_credentials=cors_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -1077,6 +1125,9 @@ ESTABLISHED_CREATORS_BY_REGION: dict[str, list[dict[str, set[str] | str]]] = {
 
 ESTABLISHED_POOL_FILE = Path(__file__).resolve().parent / "data" / "established_creators.json"
 ESTABLISHED_POOL_STALE_SECONDS = 7 * 24 * 60 * 60
+ESTABLISHED_POOL_STARTUP_REFRESH_ENABLED = (
+    os.getenv("ESTABLISHED_POOL_STARTUP_REFRESH", "0").strip().lower() in {"1", "true", "yes"}
+)
 _ESTABLISHED_REFRESH_STARTED = False
 
 
@@ -1199,6 +1250,8 @@ def refresh_established_pool_background(min_per_region: int = 50) -> None:
 
 def maybe_schedule_established_pool_refresh() -> None:
     global _ESTABLISHED_REFRESH_STARTED
+    if not ESTABLISHED_POOL_STARTUP_REFRESH_ENABLED:
+        return
     if _ESTABLISHED_REFRESH_STARTED:
         return
     if not established_pool_is_stale():
@@ -1491,24 +1544,46 @@ def top(
     if cached is not None:
         return cached
 
-    params = {
-        "part": "snippet,statistics,contentDetails",
-        "chart": "mostPopular",
-        "regionCode": region,
-        "hl": hl,
-        "maxResults": max_results,
-        "key": YOUTUBE_API_KEY,
-    }
-    if video_category_id:
-        params["videoCategoryId"] = video_category_id
-    if page_token:
-        params["pageToken"] = page_token
+    source_items: list[dict] = []
+    next_token = None
+    if region == "GLOBAL":
+        for one_region in TRENDING_REGIONS:
+            params = {
+                "part": "snippet,statistics,contentDetails",
+                "chart": "mostPopular",
+                "regionCode": one_region,
+                "hl": lang_for_region(one_region),
+                "maxResults": max_results,
+                "key": YOUTUBE_API_KEY,
+            }
+            if video_category_id:
+                params["videoCategoryId"] = video_category_id
+            source_items.extend(youtube_api_get(YOUTUBE_VIDEOS_LIST, params).get("items", []))
+    else:
+        params = {
+            "part": "snippet,statistics,contentDetails",
+            "chart": "mostPopular",
+            "regionCode": region,
+            "hl": hl,
+            "maxResults": max_results,
+            "key": YOUTUBE_API_KEY,
+        }
+        if video_category_id:
+            params["videoCategoryId"] = video_category_id
+        if page_token:
+            params["pageToken"] = page_token
 
-    data = youtube_api_get(YOUTUBE_VIDEOS_LIST, params)
-    next_token = data.get("nextPageToken")
+        data = youtube_api_get(YOUTUBE_VIDEOS_LIST, params)
+        next_token = data.get("nextPageToken")
+        source_items = data.get("items", [])
 
     items = []
-    for v in data.get("items", []):
+    seen_ids: set[str] = set()
+    for v in source_items:
+        video_id = v.get("id")
+        if video_id in seen_ids:
+            continue
+        seen_ids.add(video_id)
         snip = v.get("snippet", {})
         stats = v.get("statistics", {})
         details = v.get("contentDetails", {})
@@ -1530,7 +1605,7 @@ def top(
         )
 
         items.append({
-            "id": v.get("id"),
+            "id": video_id,
             "title": snip.get("title"),
             "channelTitle": snip.get("channelTitle"),
             "publishedAt": snip.get("publishedAt"),
@@ -1543,7 +1618,8 @@ def top(
             "defaultLanguage": snip.get("defaultLanguage"),
         })
 
-    resp = {"items": items, "nextPageToken": next_token}
+    items.sort(key=lambda x: int(x.get("views", 0) or 0), reverse=True)
+    resp = {"items": items[:max_results], "nextPageToken": next_token}
     cache_set(cache_key, resp)
     return resp
 
@@ -1623,15 +1699,18 @@ def discover(
             ratio_for_filter = scanned_ratio if scanned_ratio is not None else thumb_ratio
             pass_aspect = ratio_for_filter is not None and ratio_for_filter <= SHORTS_ASPECT_RATIO_MAX
             pass_confirmed = strict_shorts and is_confirmed_short(v.get("id") or "")
-            # If confirmation is unavailable, keep <=60s candidates to avoid empty Shorts feeds.
-            pass_duration_fallback = strict_shorts and require_60s and duration_seconds <= 60
+            pass_duration_fallback = (
+                strict_shorts and require_60s and ratio_for_filter is not None and ratio_for_filter <= 1.0
+            )
             if not (pass_aspect or pass_confirmed or pass_duration_fallback):
                 continue
         else:
             if require_60s and duration_seconds > 60:
                 continue
             confirmed_short = strict_shorts and is_confirmed_short(v.get("id") or "")
-            if strict_shorts and not (confirmed_short or (require_60s and duration_seconds <= 60)):
+            if strict_shorts and not (
+                confirmed_short or (require_60s and thumb_ratio is not None and thumb_ratio <= 1.0)
+            ):
                 continue
             if require_hash and "#shorts" not in title.lower():
                 continue
