@@ -31,6 +31,61 @@ const PATTERN_FORMAT_OPTIONS = [
   { value: "shorts", label: "Shorts" },
   { value: "videos", label: "Long-form" },
 ];
+const HELP_CHAT_NODES = {
+  root: {
+    text: "Hi, I can walk you through every feature. What do you want to do?",
+    options: [
+      { id: "winners", label: "Find best winners", next: "winners_help" },
+      { id: "patterns", label: "Use patterns", next: "patterns_help" },
+      { id: "profile", label: "Analyze a channel", next: "profile_help" },
+      { id: "quota", label: "Why no results / quota?", next: "quota_help" },
+    ],
+  },
+  winners_help: {
+    text: "Winners ranks outlier thumbnails with quality filtering and heavy cache reuse. Use region + category + quality floor, then scan high-quality cards.",
+    options: [
+      { id: "winners_action", label: "Take me to Winners", action: "goto_winners", next: "root" },
+      { id: "winners_pro", label: "Automate winner workflows (Pro)", pro: true, next: "pro_nudge" },
+      { id: "back", label: "Back", next: "root" },
+    ],
+  },
+  patterns_help: {
+    text: "Patterns lets you extract visual clusters, save reusable styles, and apply them on fresh sources with exact or loose matching.",
+    options: [
+      { id: "patterns_action", label: "Open Patterns tab", action: "goto_patterns", next: "root" },
+      { id: "patterns_extract", label: "How to extract fast", next: "patterns_extract_help" },
+      { id: "back", label: "Back", next: "root" },
+    ],
+  },
+  patterns_extract_help: {
+    text: "Pick source + format (Shorts/Long-form), click Extract, then click cluster chips to narrow the grid. Save the final style when ready.",
+    options: [
+      { id: "patterns_open", label: "Open Patterns now", action: "goto_patterns", next: "root" },
+      { id: "back", label: "Back", next: "patterns_help" },
+    ],
+  },
+  profile_help: {
+    text: "Paste @handle or channel URL in Profile. Use Recent to spot cadence and Popular to spot proven concepts.",
+    options: [
+      { id: "profile_action", label: "Take me to Profile", action: "goto_profile", next: "root" },
+      { id: "back", label: "Back", next: "root" },
+    ],
+  },
+  quota_help: {
+    text: "If results look sparse, cache may be serving yesterday's safest dataset to save quota. Try region/category changes before forcing fresh pulls.",
+    options: [
+      { id: "quota_pro", label: "Get priority automation (Pro)", pro: true, next: "pro_nudge" },
+      { id: "back", label: "Back", next: "root" },
+    ],
+  },
+  pro_nudge: {
+    text: "Pro unlocks workflow speedups, advanced automation nudges, and deeper pattern operations.",
+    options: [
+      { id: "open_pricing", label: "View Pro plans", action: "open_pricing", next: "root" },
+      { id: "back", label: "Back", next: "root" },
+    ],
+  },
+};
 const CLUSTER_COLOR_PALETTE = [
   "#2D6CDF",
   "#00A7A0",
@@ -392,7 +447,9 @@ function ThumbnailGrid({
                 />
               </div>
             ) : (
-              <img src={thumb} alt={v.title} style={{ width: "100%", display: "block", height: "auto" }} />
+              <div style={{ width: "100%", aspectRatio: "16 / 9", background: "#111" }}>
+                <img src={thumb} alt={v.title} style={{ width: "100%", height: "100%", display: "block", objectFit: "cover" }} />
+              </div>
             )}
             <div style={{ padding: 10 }}>
               <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.2, color: "#111" }}>{v.title}</div>
@@ -834,6 +891,19 @@ export default function App() {
       return [];
     }
   });
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [helpMessages, setHelpMessages] = useState([]);
+  const [helpNodeId, setHelpNodeId] = useState("root");
+  const [helpAnalytics, setHelpAnalytics] = useState(() => {
+    try {
+      const raw = localStorage.getItem("helpAnalytics");
+      return raw
+        ? JSON.parse(raw)
+        : { opens: 0, option_clicks: 0, node_hits: {}, option_hits: {} };
+    } catch {
+      return { opens: 0, option_clicks: 0, node_hits: {}, option_hits: {} };
+    }
+  });
 
   const isShorts = type === "shorts";
   const baseUrl = useMemo(() => (isShorts ? apiUrl("/discover") : apiUrl("/top")), [isShorts]);
@@ -898,6 +968,66 @@ export default function App() {
       return next.slice(0, 20);
     });
   }, [tab]);
+
+  const trackHelpEvent = useCallback((kind, key = "") => {
+    setHelpAnalytics((prev) => {
+      const next = {
+        ...prev,
+        node_hits: { ...(prev.node_hits || {}) },
+        option_hits: { ...(prev.option_hits || {}) },
+      };
+      if (kind === "open") next.opens = Number(prev.opens || 0) + 1;
+      if (kind === "option") next.option_clicks = Number(prev.option_clicks || 0) + 1;
+      if (kind === "node" && key) next.node_hits[key] = Number(next.node_hits[key] || 0) + 1;
+      if (kind === "option_hit" && key) next.option_hits[key] = Number(next.option_hits[key] || 0) + 1;
+      return next;
+    });
+  }, []);
+
+  const pushHelpBotMessage = useCallback((text) => {
+    setHelpMessages((prev) => [...prev, { role: "bot", text: String(text || "") }]);
+  }, []);
+
+  const openHelpAssistant = useCallback(() => {
+    setHelpOpen(true);
+    trackHelpEvent("open");
+    if (!helpMessages.length) {
+      const root = HELP_CHAT_NODES.root;
+      setHelpMessages([{ role: "bot", text: root.text }]);
+      setHelpNodeId("root");
+      trackHelpEvent("node", "root");
+    }
+  }, [helpMessages.length, trackHelpEvent]);
+
+  const executeHelpAction = useCallback((action) => {
+    if (action === "goto_winners") setTab("winners");
+    if (action === "goto_patterns") setTab("patterns");
+    if (action === "goto_profile") setTab("profile");
+    if (action === "open_pricing") setPricingOpen(true);
+  }, []);
+
+  const onHelpOptionClick = useCallback((option) => {
+    if (!option) return;
+    setHelpMessages((prev) => [...prev, { role: "user", text: option.label }]);
+    trackHelpEvent("option");
+    trackHelpEvent("option_hit", option.id || option.label);
+
+    if (option.pro && !isProUser) {
+      const proNode = HELP_CHAT_NODES.pro_nudge;
+      pushHelpBotMessage(proNode.text);
+      setHelpNodeId("pro_nudge");
+      trackHelpEvent("node", "pro_nudge");
+      return;
+    }
+
+    if (option.action) executeHelpAction(option.action);
+
+    const nextId = option.next || "root";
+    const nextNode = HELP_CHAT_NODES[nextId] || HELP_CHAT_NODES.root;
+    pushHelpBotMessage(nextNode.text);
+    setHelpNodeId(nextId in HELP_CHAT_NODES ? nextId : "root");
+    trackHelpEvent("node", nextId in HELP_CHAT_NODES ? nextId : "root");
+  }, [isProUser, pushHelpBotMessage, trackHelpEvent, executeHelpAction]);
 
   const showGlobalNotice = useCallback((message, tone = "info", durationMs = 5200) => {
     if (!message) return;
@@ -982,6 +1112,14 @@ export default function App() {
       // ignore
     }
   }, [recentClusters]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("helpAnalytics", JSON.stringify(helpAnalytics));
+    } catch {
+      // ignore
+    }
+  }, [helpAnalytics]);
 
   useEffect(() => {
     if (!savedPatterns.length) return;
@@ -2316,6 +2454,10 @@ export default function App() {
   };
 
   const compareRows = useMemo(() => compareResult?.rows || [], [compareResult]);
+  const helpOptions = useMemo(() => {
+    const node = HELP_CHAT_NODES[helpNodeId] || HELP_CHAT_NODES.root;
+    return node.options || [];
+  }, [helpNodeId]);
   const allVisiblePatternsSelected = useMemo(() => {
     if (!savedPatterns.length) return false;
     const selected = new Set(selectedPatternIds);
@@ -2656,7 +2798,7 @@ export default function App() {
               </div>
             )}
             <details style={{ marginTop: 10 }}>
-              <summary style={{ cursor: "pointer", fontSize: 12, opacity: 0.85 }}>Library tools</summary>
+              <summary className="library-tools-summary">🧰 Library Tools</summary>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "center", marginTop: 10 }}>
               <input
                 value={patternLibraryQuery}
@@ -2709,6 +2851,12 @@ export default function App() {
                 onChange={importPatternLibrary}
                 style={{ display: "none" }}
               />
+              <button type="button" onClick={openHelpAssistant} style={tabButtonStyle(false)}>
+                💬 Open Assistant
+              </button>
+              <div style={{ fontSize: 11, opacity: 0.78 }}>
+                Assistant opens: {helpAnalytics.opens || 0} | option taps: {helpAnalytics.option_clicks || 0}
+              </div>
               </div>
             </details>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "center" }}>
@@ -3047,6 +3195,43 @@ export default function App() {
       >
         {darkMode ? "\u2600\uFE0F" : "\uD83C\uDF19"}
       </button>
+      <button
+        type="button"
+        className={`help-chat-toggle ${darkMode ? "help-chat-toggle--dark" : "help-chat-toggle--light"}`}
+        onClick={() => (helpOpen ? setHelpOpen(false) : openHelpAssistant())}
+      >
+        💬
+      </button>
+      {helpOpen && (
+        <div className={`help-chat-panel ${darkMode ? "help-chat-panel--dark" : "help-chat-panel--light"}`}>
+          <div className="help-chat-panel__head">
+            <div className="help-chat-panel__title">Feature Assistant</div>
+            <button type="button" className="help-chat-panel__close" onClick={() => setHelpOpen(false)}>✕</button>
+          </div>
+          <div className="help-chat-panel__body">
+            {helpMessages.map((msg, idx) => (
+              <div
+                key={`${msg.role}-${idx}`}
+                className={`help-chat-bubble ${msg.role === "user" ? "help-chat-bubble--user" : "help-chat-bubble--bot"}`}
+              >
+                {msg.text}
+              </div>
+            ))}
+          </div>
+          <div className="help-chat-panel__options">
+            {helpOptions.map((option) => (
+              <button
+                key={option.id || option.label}
+                type="button"
+                className="help-chat-option"
+                onClick={() => onHelpOptionClick(option)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       <ProPrompt
         open={proPrompt.open}
         darkMode={darkMode}
