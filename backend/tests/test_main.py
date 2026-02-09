@@ -522,3 +522,34 @@ def test_pattern_list_query_sort(monkeypatch, tmp_path):
     main_module.update_pattern(first_id, main_module.PatternUpdateRequest(pinned=True), make_request())
     pinned_only_after = main_module.list_patterns(make_request(), sort="pinned_recent", pinned_only=1, limit=10, offset=0)
     assert len(pinned_only_after["items"]) == 1
+
+
+def test_pattern_export_import(monkeypatch, tmp_path):
+    main_module.PATTERN_LIBRARY.clear()
+    monkeypatch.setattr(main_module, "PATTERN_LIBRARY_FILE", tmp_path / "pattern_library.json")
+    created = main_module.save_pattern(
+        main_module.PatternSaveRequest(
+            name="Export Me",
+            clusters=[{"cluster_id": "cluster_1", "signature": "sig:one", "count": 2}],
+            filters={"source": "winners"},
+            notes="portable",
+        ),
+        make_request(),
+    )
+    pattern_id = created["pattern_id"]
+    main_module.update_pattern(pattern_id, main_module.PatternUpdateRequest(pinned=True), make_request())
+
+    exported = main_module.export_patterns(make_request(), pinned_only=1)
+    assert exported["meta"]["count"] == 1
+    assert exported["items"][0]["name"] == "Export Me"
+
+    main_module.PATTERN_LIBRARY.clear()
+    imported = main_module.import_patterns(
+        main_module.PatternImportRequest(patterns=exported["items"], strategy="overwrite"),
+        make_request(),
+    )
+    assert imported["ok"] is True
+    assert imported["imported"] == 1
+    assert imported["total_library"] == 1
+    listed = main_module.list_patterns(make_request())
+    assert listed["items"][0]["name"] == "Export Me"

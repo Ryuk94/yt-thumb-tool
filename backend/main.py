@@ -172,6 +172,11 @@ class PatternMatchRequest(BaseModel):
     items: list[PatternExtractItem] = Field(default_factory=list)
 
 
+class PatternImportRequest(BaseModel):
+    patterns: list[dict[str, Any]] = Field(default_factory=list)
+    strategy: str = "skip"  # skip | overwrite
+
+
 class YouTubeQuotaExceededError(Exception):
     pass
 
@@ -1861,6 +1866,82 @@ def compare_patterns(pattern_a_id: str, pattern_b_id: str, request: Request):
             "overlap_ratio": round(overlap_ratio, 4),
         },
         "rows": rows,
+    }
+
+
+@app.get("/patterns/export")
+def export_patterns(request: Request, pinned_only: int = 0):
+    enforce_api_rate_limit(request, scope="patterns_export")
+    with PATTERN_LIBRARY_LOCK:
+        rows = list(PATTERN_LIBRARY.values())
+
+    if pinned_only:
+        rows = [row for row in rows if bool(row.get("pinned"))]
+    rows.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+    return {
+        "items": rows,
+        "meta": {
+            "count": len(rows),
+            "pinned_only": int(1 if pinned_only else 0),
+            "exported_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        },
+    }
+
+
+@app.post("/patterns/import")
+def import_patterns(payload: PatternImportRequest, request: Request):
+    enforce_api_rate_limit(request, scope="patterns_import")
+    strategy = (payload.strategy or "skip").strip().lower()
+    if strategy not in {"skip", "overwrite"}:
+        raise HTTPException(status_code=400, detail="strategy must be one of: skip, overwrite")
+    if not payload.patterns:
+        raise HTTPException(status_code=400, detail="patterns must contain at least one item")
+
+    imported = 0
+    skipped = 0
+    overwritten = 0
+    now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    with PATTERN_LIBRARY_LOCK:
+        for raw in payload.patterns:
+            if not isinstance(raw, dict):
+                skipped += 1
+                continue
+            name = str(raw.get("name") or "").strip()
+            clusters = raw.get("clusters")
+            if not name or not isinstance(clusters, list):
+                skipped += 1
+                continue
+
+            incoming_id = str(raw.get("pattern_id") or "").strip() or uuid.uuid4().hex[:12]
+            exists = incoming_id in PATTERN_LIBRARY
+            if exists and strategy == "skip":
+                skipped += 1
+                continue
+            if exists and strategy == "overwrite":
+                overwritten += 1
+
+            PATTERN_LIBRARY[incoming_id] = {
+                "pattern_id": incoming_id,
+                "name": name,
+                "clusters": clusters,
+                "filters": raw.get("filters") if isinstance(raw.get("filters"), dict) else {},
+                "notes": (str(raw.get("notes")).strip() if raw.get("notes") is not None else None),
+                "pinned": bool(raw.get("pinned")),
+                "created_at": str(raw.get("created_at") or now_iso),
+                "updated_at": str(raw.get("updated_at") or now_iso),
+            }
+            imported += 1
+
+        snapshot = dict(PATTERN_LIBRARY)
+
+    persist_pattern_library(snapshot)
+    return {
+        "ok": True,
+        "imported": imported,
+        "skipped": skipped,
+        "overwritten": overwritten,
+        "total_library": len(snapshot),
     }
 
 

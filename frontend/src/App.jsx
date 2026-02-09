@@ -577,6 +577,7 @@ export default function App() {
   const [globalNotice, setGlobalNotice] = useState({ message: "", tone: "info" });
   const loadingTokenRef = useRef(0);
   const noticeTimeoutRef = useRef(null);
+  const patternImportInputRef = useRef(null);
   const [previewItem, setPreviewItem] = useState(null);
   const [proPrompt, setProPrompt] = useState({ open: false, title: "", message: "", cta: "" });
   const onboardingFlagsRef = useRef({ scrollPromptShown: false, hoverPromptShown: false });
@@ -1524,6 +1525,104 @@ export default function App() {
     fetchSavedPatterns,
   ]);
 
+  const exportPatternLibrary = useCallback(() => {
+    if (!isProUser) {
+      setPatternError("Pattern export is a Pro feature.");
+      setPricingOpen(true);
+      return;
+    }
+    setPatternError("");
+    const loadingToken = startGlobalLoading("Exporting pattern library...", 26);
+    fetch(`${apiUrl("/patterns/export")}?pinned_only=${patternPinnedOnly ? "1" : "0"}`)
+      .then(async (r) => {
+        updateGlobalLoading(loadingToken, "Packaging export JSON...", 80);
+        if (!r.ok) throw new Error(await readApiErrorDetail(r, "Failed to export pattern library."));
+        return r.json();
+      })
+      .then((payload) => {
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        link.href = url;
+        link.download = `pattern-library-${stamp}.json`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        showGlobalNotice("Pattern library exported.", "info", 2400);
+      })
+      .catch((err) => {
+        setPatternError(err.message || "Failed to export pattern library.");
+      })
+      .finally(() => endGlobalLoading(loadingToken));
+  }, [
+    isProUser,
+    patternPinnedOnly,
+    startGlobalLoading,
+    updateGlobalLoading,
+    endGlobalLoading,
+    showGlobalNotice,
+  ]);
+
+  const importPatternLibrary = useCallback((event) => {
+    if (!isProUser) {
+      setPatternError("Pattern import is a Pro feature.");
+      setPricingOpen(true);
+      return;
+    }
+    const file = event?.target?.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result || "{}"));
+        const rows = Array.isArray(parsed?.items) ? parsed.items : Array.isArray(parsed?.patterns) ? parsed.patterns : [];
+        if (!rows.length) {
+          setPatternError("Import file has no patterns.");
+          return;
+        }
+        const loadingToken = startGlobalLoading("Importing pattern library...", 24);
+        fetch(apiUrl("/patterns/import"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ patterns: rows, strategy: "overwrite" }),
+        })
+          .then(async (r) => {
+            updateGlobalLoading(loadingToken, "Merging imported patterns...", 80);
+            if (!r.ok) throw new Error(await readApiErrorDetail(r, "Failed to import pattern library."));
+            return r.json();
+          })
+          .then((payload) => {
+            fetchSavedPatterns(true);
+            showGlobalNotice(
+              `Imported ${payload.imported || 0} patterns (${payload.overwritten || 0} overwritten).`,
+              "info",
+              2800
+            );
+          })
+          .catch((err) => {
+            setPatternError(err.message || "Failed to import pattern library.");
+          })
+          .finally(() => {
+            endGlobalLoading(loadingToken);
+            if (patternImportInputRef.current) patternImportInputRef.current.value = "";
+          });
+      } catch {
+        setPatternError("Invalid JSON file for pattern import.");
+        if (patternImportInputRef.current) patternImportInputRef.current.value = "";
+      }
+    };
+    reader.readAsText(file);
+  }, [
+    isProUser,
+    startGlobalLoading,
+    updateGlobalLoading,
+    endGlobalLoading,
+    fetchSavedPatterns,
+    showGlobalNotice,
+  ]);
+
   const onProfileKeyDown = (e) => {
     if (e.key === "Enter") fetchProfile(true);
   };
@@ -1927,6 +2026,19 @@ export default function App() {
               >
                 {patternPinnedOnly ? "Pinned Only" : "All Patterns"}
               </button>
+              <button type="button" onClick={exportPatternLibrary} style={tabButtonStyle(false)}>
+                Export JSON
+              </button>
+              <button type="button" onClick={() => patternImportInputRef.current?.click()} style={tabButtonStyle(false)}>
+                Import JSON
+              </button>
+              <input
+                ref={patternImportInputRef}
+                type="file"
+                accept="application/json,.json"
+                onChange={importPatternLibrary}
+                style={{ display: "none" }}
+              />
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "center" }}>
               <RoundedDropdown
