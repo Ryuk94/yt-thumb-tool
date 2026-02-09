@@ -774,7 +774,12 @@ export default function App() {
   useEffect(() => {
     const onScroll = () => {
       if (onboardingFlagsRef.current.scrollPromptShown) return;
-      if (window.scrollY < 900) return;
+      const cards = Array.from(document.querySelectorAll(".thumb-card"));
+      if (cards.length < 48) return;
+      const marker = cards[47];
+      if (!marker) return;
+      const rect = marker.getBoundingClientRect();
+      if (rect.top > window.innerHeight * 0.85) return;
       onboardingFlagsRef.current.scrollPromptShown = true;
       setProPrompt({
         open: true,
@@ -783,8 +788,13 @@ export default function App() {
         cta: "Upgrade to Pro",
       });
     };
+    onScroll();
     window.addEventListener("scroll", onScroll, { passive: true });
-    return () => window.removeEventListener("scroll", onScroll);
+    window.addEventListener("resize", onScroll);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+    };
   }, []);
 
   useEffect(() => {
