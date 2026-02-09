@@ -481,3 +481,33 @@ def test_pattern_update(monkeypatch, tmp_path):
     assert updated["pattern"].get("updated_at")
     listed = main_module.list_patterns(make_request())
     assert listed["items"][0]["notes"] == "note"
+
+
+def test_pattern_list_query_sort(monkeypatch, tmp_path):
+    main_module.PATTERN_LIBRARY.clear()
+    monkeypatch.setattr(main_module, "PATTERN_LIBRARY_FILE", tmp_path / "pattern_library.json")
+    main_module.save_pattern(
+        main_module.PatternSaveRequest(
+            name="Beta Pattern",
+            clusters=[],
+            filters={},
+            notes="sports",
+        ),
+        make_request(),
+    )
+    main_module.save_pattern(
+        main_module.PatternSaveRequest(
+            name="Alpha Pattern",
+            clusters=[],
+            filters={},
+            notes="gaming",
+        ),
+        make_request(),
+    )
+
+    queried = main_module.list_patterns(make_request(), query="gami", sort="name", limit=10, offset=0)
+    assert queried["meta"]["total"] == 1
+    assert queried["items"][0]["name"] == "Alpha Pattern"
+
+    named = main_module.list_patterns(make_request(), sort="name", limit=10, offset=0)
+    assert named["items"][0]["name"] == "Alpha Pattern"

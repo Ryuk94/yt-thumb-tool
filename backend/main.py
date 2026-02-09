@@ -1719,12 +1719,40 @@ def save_pattern(payload: PatternSaveRequest, request: Request):
 
 
 @app.get("/patterns")
-def list_patterns(request: Request):
+def list_patterns(
+    request: Request,
+    query: str | None = None,
+    sort: str = "recent",  # recent | oldest | name
+    limit: int = 100,
+    offset: int = 0,
+):
     enforce_api_rate_limit(request, scope="patterns_list")
+    sort_mode = (sort or "recent").lower()
+    if sort_mode not in {"recent", "oldest", "name"}:
+        raise HTTPException(status_code=400, detail="sort must be one of: recent, oldest, name")
+    limit = max(1, min(limit, 500))
+    offset = max(0, offset)
+    needle = (query or "").strip().lower()
+
     with PATTERN_LIBRARY_LOCK:
         patterns = list(PATTERN_LIBRARY.values())
 
-    patterns.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+    if needle:
+        def _matches(pattern: dict[str, Any]) -> bool:
+            name = str(pattern.get("name") or "").lower()
+            notes = str(pattern.get("notes") or "").lower()
+            return needle in name or needle in notes
+        patterns = [pattern for pattern in patterns if _matches(pattern)]
+
+    if sort_mode == "name":
+        patterns.sort(key=lambda item: str(item.get("name") or "").lower())
+    elif sort_mode == "oldest":
+        patterns.sort(key=lambda item: str(item.get("created_at") or ""), reverse=False)
+    else:
+        patterns.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+
+    total = len(patterns)
+    sliced = patterns[offset:offset + limit]
     summarized = [
         {
             "pattern_id": pattern.get("pattern_id"),
@@ -1734,9 +1762,18 @@ def list_patterns(request: Request):
             "notes": pattern.get("notes"),
             "cluster_count": len(pattern.get("clusters") or []),
         }
-        for pattern in patterns
+        for pattern in sliced
     ]
-    return {"items": summarized}
+    return {
+        "items": summarized,
+        "meta": {
+            "total": total,
+            "query": query or "",
+            "sort": sort_mode,
+            "limit": limit,
+            "offset": offset,
+        },
+    }
 
 
 @app.get("/patterns/apply/{pattern_id}")

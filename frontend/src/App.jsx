@@ -565,6 +565,10 @@ export default function App() {
       return [];
     }
   });
+  const [patternLibraryQuery, setPatternLibraryQuery] = useState("");
+  const [patternLibrarySort, setPatternLibrarySort] = useState("recent");
+  const [patternLibraryLimit, setPatternLibraryLimit] = useState(100);
+  const [patternLibraryMeta, setPatternLibraryMeta] = useState({ total: 0 });
 
   const [darkMode, setDarkMode] = useState(() => readCookie("darkMode") === "1");
   const [globalLoading, setGlobalLoading] = useState({ active: false, message: "", progress: 0 });
@@ -687,13 +691,20 @@ export default function App() {
 
   const fetchSavedPatterns = useCallback((silent = false) => {
     if (!silent) setPatternError("");
-    fetch(apiUrl("/patterns"))
+    const params = new URLSearchParams({
+      query: patternLibraryQuery,
+      sort: patternLibrarySort,
+      limit: String(patternLibraryLimit),
+      offset: "0",
+    });
+    fetch(`${apiUrl("/patterns")}?${params.toString()}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(await readApiErrorDetail(r, "Failed to load saved patterns."));
         return r.json();
       })
       .then((payload) => {
         const rows = Array.isArray(payload?.items) ? payload.items : [];
+        setPatternLibraryMeta(payload?.meta || { total: rows.length || 0 });
         if (rows.length) {
           setSavedPatterns(rows);
           return;
@@ -703,7 +714,7 @@ export default function App() {
       .catch((err) => {
         if (!silent) setPatternError(err.message || "Failed to load saved patterns.");
       });
-  }, []);
+  }, [patternLibraryQuery, patternLibrarySort, patternLibraryLimit]);
 
   useEffect(() => {
     const onOpenPreview = (event) => {
@@ -1047,6 +1058,12 @@ export default function App() {
   useEffect(() => {
     if (tab === "patterns") fetchSavedPatterns(true);
   }, [tab, fetchSavedPatterns]);
+
+  useEffect(() => {
+    if (tab !== "patterns") return;
+    const timeout = window.setTimeout(() => fetchSavedPatterns(true), 180);
+    return () => window.clearTimeout(timeout);
+  }, [tab, patternLibraryQuery, patternLibrarySort, patternLibraryLimit, fetchSavedPatterns]);
 
   useEffect(() => {
     setAppliedPatternItems([]);
@@ -1819,6 +1836,37 @@ export default function App() {
                 </button>
               </div>
             )}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "center", marginTop: 10 }}>
+              <input
+                value={patternLibraryQuery}
+                onChange={(e) => setPatternLibraryQuery(e.target.value)}
+                placeholder="Search saved patterns"
+                style={{ ...roundedFieldStyle, minWidth: 260 }}
+              />
+              <RoundedDropdown
+                value={patternLibrarySort}
+                onChange={setPatternLibrarySort}
+                darkMode={darkMode}
+                minWidth={124}
+                options={[
+                  { value: "recent", label: "Recent" },
+                  { value: "oldest", label: "Oldest" },
+                  { value: "name", label: "Name" },
+                ]}
+              />
+              <RoundedDropdown
+                value={patternLibraryLimit}
+                onChange={setPatternLibraryLimit}
+                darkMode={darkMode}
+                minWidth={96}
+                options={[
+                  { value: 25, label: "25" },
+                  { value: 50, label: "50" },
+                  { value: 100, label: "100" },
+                  { value: 250, label: "250" },
+                ]}
+              />
+            </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "center" }}>
               <RoundedDropdown
                 value={patternSource}
@@ -1893,6 +1941,12 @@ export default function App() {
             )}
 
             {patternError && <div style={{ marginTop: 10, color: "#b00020", fontSize: 13, textAlign: "center" }}>{patternError}</div>}
+
+            {patternLibraryMeta?.total != null && (
+              <div style={{ marginTop: 8, fontSize: 12, textAlign: "center", opacity: 0.82 }}>
+                Saved patterns: {patternLibraryMeta.total}
+              </div>
+            )}
 
             {!!savedPatterns.length && (
               <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
