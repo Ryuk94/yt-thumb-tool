@@ -499,6 +499,132 @@ button:not(:disabled):hover {
   text-align: left;
 }
 
+.app-side-toggle {
+  position: fixed;
+  right: 18px;
+  top: 18px;
+  z-index: 170;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  border: 0;
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: 700;
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.2);
+}
+
+.app-side-toggle--dark {
+  background: rgba(20, 22, 30, 0.95);
+  color: #f6f7fb;
+}
+
+.app-side-toggle--light {
+  background: rgba(255, 255, 255, 0.95);
+  color: #192030;
+}
+
+.app-sidebar {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 165;
+  width: min(340px, calc(100vw - 24px));
+  max-height: calc(100vh - 28px);
+  overflow: auto;
+  border-radius: 16px;
+  box-shadow: 0 22px 46px rgba(0, 0, 0, 0.26);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(8px);
+  transform: translateX(calc(100% + 20px));
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 220ms ease, opacity 180ms ease;
+  padding: 14px;
+}
+
+.app-sidebar--open {
+  transform: translateX(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.app-sidebar--dark {
+  background: rgba(14, 17, 24, 0.97);
+  color: #f3f5f8;
+}
+
+.app-sidebar--light {
+  background: rgba(255, 255, 255, 0.97);
+  color: #192030;
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+.app-sidebar__section + .app-sidebar__section {
+  margin-top: 14px;
+  border-top: 1px solid rgba(140, 152, 170, 0.2);
+  padding-top: 12px;
+}
+
+.app-sidebar__title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 800;
+  opacity: 0.78;
+  text-align: left;
+}
+
+.app-sidebar__row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.app-sidebar__btn {
+  border: 1px solid rgba(148, 162, 184, 0.34);
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.app-sidebar__btn--accent {
+  border-color: transparent;
+  background: linear-gradient(90deg, #ff3b3f, #ff6b4a);
+  color: #fff;
+}
+
+.app-sidebar__list {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-start;
+}
+
+.app-sidebar__chip {
+  border: 1px solid rgba(148, 162, 184, 0.32);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 11px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.app-sidebar__empty {
+  font-size: 11px;
+  opacity: 0.68;
+}
+
 @keyframes preview-overlay-in {
   from {
     opacity: 0;

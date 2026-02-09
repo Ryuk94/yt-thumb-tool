@@ -85,9 +85,9 @@ def matches_lang(snip: dict, lang: str) -> bool:
 # ---------------------------
 
 CACHE: dict[str, tuple[float, Any]] = {}
-CACHE_TTL_SECONDS = 60 * 30  # 30 minutes
+CACHE_TTL_SECONDS = 24 * 60 * 60  # 24 hours
 SHORTS_DETECT_CACHE: dict[str, tuple[float, bool]] = {}
-SHORTS_DETECT_TTL_SECONDS = 60 * 60 * 6  # 6 hours
+SHORTS_DETECT_TTL_SECONDS = 24 * 60 * 60  # 24 hours
 PATTERN_LIBRARY: dict[str, dict[str, Any]] = {}
 PATTERN_LIBRARY_LOCK = threading.Lock()
 PATTERN_LIBRARY_FILE = Path(
@@ -611,17 +611,17 @@ def fetch_profile_grid_tier_b(channel_id: str, limit: int, sort_mode: str) -> li
     return items[:limit]
 
 CHANNEL_UPLOADS_CACHE: dict[str, tuple[float, str]] = {}
-CHANNEL_UPLOADS_TTL_SECONDS = 30 * 60
-WINNERS_CACHE_TTL_SECONDS = 45 * 60
-WINNERS_SOURCE_CACHE_TTL_SECONDS = 6 * 60 * 60
+CHANNEL_UPLOADS_TTL_SECONDS = 24 * 60 * 60
+WINNERS_CACHE_TTL_SECONDS = 24 * 60 * 60
+WINNERS_SOURCE_CACHE_TTL_SECONDS = 24 * 60 * 60
 SHORTS_ASPECT_RATIO_MAX = 0.8
 VIDEOS_ASPECT_RATIO_MIN = 1.2
-FILTER_CACHE_VERSION = "v2"
+FILTER_CACHE_VERSION = "v3"
 ESTABLISHED_CHANNEL_RESOLVE_CACHE: dict[str, tuple[float, str]] = {}
 ESTABLISHED_CHANNEL_RESOLVE_TTL_SECONDS = 7 * 24 * 60 * 60
 ESTABLISHED_RECENT_IDS_CACHE: dict[str, tuple[float, list[str]]] = {}
-ESTABLISHED_RECENT_IDS_TTL_SECONDS = 6 * 60 * 60
-PROFILE_GRID_CACHE_TTL_SECONDS = 30 * 60
+ESTABLISHED_RECENT_IDS_TTL_SECONDS = 24 * 60 * 60
+PROFILE_GRID_CACHE_TTL_SECONDS = 24 * 60 * 60
 PROFILE_RATE_LIMIT_WINDOW_SECONDS = 60
 PROFILE_RATE_LIMIT_MAX_REQUESTS = 30
 PROFILE_RATE_LIMIT_BUCKETS: dict[str, deque[float]] = {}
@@ -2273,9 +2273,9 @@ def discover(
     page_token: str | None = None,
 
     # language enforcement (soft)
-    enforce_lang: bool = True,
-    strict_shorts: bool = True,
-    aspect_filter: bool = True,
+    enforce_lang: bool = False,
+    strict_shorts: bool = False,
+    aspect_filter: bool = False,
 ):
     """
     Shorts discovery feed:

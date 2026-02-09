@@ -6,6 +6,7 @@ const RAW_API_BASE =
   (typeof window !== "undefined" && window.location.hostname === "localhost" ? "http://localhost:8000" : "/api");
 const API_BASE = RAW_API_BASE.replace(/\/$/, "");
 const ACCENT_RED = "#ff3b3f";
+const PATTERNS_PRO_ONLY = false;
 const REGION_OPTIONS = [
   { value: "GLOBAL", label: "Global" },
   { value: "AU", label: "AU" },
@@ -269,6 +270,7 @@ function ThumbnailGrid({
   portraitMode = false,
   showMetrics = false,
   gridContext = "generic",
+  enableGroupHoverHighlight = true,
 }) {
   const [hoveredGroup, setHoveredGroup] = useState(null);
   const [clusterTooltip, setClusterTooltip] = useState(null);
@@ -295,9 +297,9 @@ function ThumbnailGrid({
         const aspectRatio = v.thumb_insights?.aspect_ratio ?? v.thumbnail_aspect_ratio;
 
         const groupId = v.cluster_id || v.source_group || null;
-        const clusterName = String(v.cluster_name || groupId || "").trim();
+        const clusterName = enableGroupHoverHighlight ? String(v.cluster_name || groupId || "").trim() : "";
         const clusterColor = v.cluster_color || clusterColorFromId(groupId || clusterName || "default");
-        const isGrouped = !!groupId && !!hoveredGroup;
+        const isGrouped = enableGroupHoverHighlight && !!groupId && !!hoveredGroup;
         const isGroupMatch = isGrouped && groupId === hoveredGroup;
         const isGroupDimmed = isGrouped && !isGroupMatch;
 
@@ -346,7 +348,7 @@ function ThumbnailGrid({
             }}
             onMouseEnter={(event) => {
               setHoveredGroup(groupId);
-              if (clusterName) {
+              if (enableGroupHoverHighlight && clusterName) {
                 setClusterTooltip({
                   x: event.clientX + 14,
                   y: event.clientY + 16,
@@ -365,7 +367,7 @@ function ThumbnailGrid({
               );
             }}
             onMouseMove={(event) => {
-              if (!clusterName) return;
+              if (!enableGroupHoverHighlight || !clusterName) return;
               setClusterTooltip({
                 x: event.clientX + 14,
                 y: event.clientY + 16,
@@ -773,6 +775,7 @@ export default function App() {
   const [quickClusterSearch, setQuickClusterSearch] = useState(null);
 
   const [darkMode, setDarkMode] = useState(() => readCookie("darkMode") === "1");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [globalLoading, setGlobalLoading] = useState({ active: false, message: "", progress: 0 });
   const [globalNotice, setGlobalNotice] = useState({ message: "", tone: "info" });
   const loadingTokenRef = useRef(0);
@@ -789,6 +792,22 @@ export default function App() {
       return localStorage.getItem("isProUser") === "1";
     } catch {
       return false;
+    }
+  });
+  const [recentSearches, setRecentSearches] = useState(() => {
+    try {
+      const raw = localStorage.getItem("recentSearches");
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [recentClusters, setRecentClusters] = useState(() => {
+    try {
+      const raw = localStorage.getItem("recentClusters");
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
     }
   });
 
@@ -821,11 +840,40 @@ export default function App() {
   }, []);
 
   const requirePro = useCallback((message = "This feature requires Pro.") => {
-    if (isProUser) return true;
+    if (!PATTERNS_PRO_ONLY || isProUser) return true;
     setPatternError(message);
     setPricingOpen(true);
     return false;
   }, [isProUser]);
+
+  const addRecentSearch = useCallback((entry) => {
+    const label = String(entry?.label || "").trim();
+    if (!label) return;
+    const row = {
+      label,
+      tab: String(entry?.tab || tab),
+      ts: new Date().toISOString(),
+    };
+    setRecentSearches((prev) => {
+      const next = [row, ...prev.filter((item) => item.label !== row.label || item.tab !== row.tab)];
+      return next.slice(0, 20);
+    });
+  }, [tab]);
+
+  const addRecentCluster = useCallback((entry) => {
+    const clusterId = String(entry?.clusterId || "").trim();
+    if (!clusterId) return;
+    const row = {
+      clusterId,
+      clusterName: String(entry?.clusterName || clusterId),
+      context: String(entry?.context || tab),
+      ts: new Date().toISOString(),
+    };
+    setRecentClusters((prev) => {
+      const next = [row, ...prev.filter((item) => item.clusterId !== row.clusterId || item.context !== row.context)];
+      return next.slice(0, 20);
+    });
+  }, [tab]);
 
   const showGlobalNotice = useCallback((message, tone = "info", durationMs = 5200) => {
     if (!message) return;
@@ -894,6 +942,22 @@ export default function App() {
       // ignore
     }
   }, [isProUser]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("recentSearches", JSON.stringify(recentSearches.slice(0, 20)));
+    } catch {
+      // ignore
+    }
+  }, [recentSearches]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("recentClusters", JSON.stringify(recentClusters.slice(0, 20)));
+    } catch {
+      // ignore
+    }
+  }, [recentClusters]);
 
   useEffect(() => {
     if (!savedPatterns.length) return;
@@ -1020,9 +1084,9 @@ export default function App() {
       const p =
         `region=${region}&max_results=24` +
         `&days=7` +
-        `&enforce_lang=true` +
-        `&strict_shorts=true` +
-        `&aspect_filter=true`;
+        `&enforce_lang=false` +
+        `&strict_shorts=false` +
+        `&aspect_filter=false`;
       return pageToken ? `${p}&page_token=${pageToken}` : p;
     }
 
@@ -1046,6 +1110,7 @@ export default function App() {
       .then((d) => {
         updateGlobalLoading(loadingToken, "Rendering thumbnails...", 86);
         setItems(d.items || []);
+        addRecentSearch({ tab: "trending", label: `Trending ${type} • ${region}` });
         if (isShorts) setNextTokenDiscover(d.nextPageToken || null);
         else setNextTokenTop(d.nextPageToken || null);
       })
@@ -1061,7 +1126,7 @@ export default function App() {
         setTrendingLoading(false);
         endGlobalLoading(loadingToken);
       });
-  }, [baseUrl, region, type, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
+  }, [baseUrl, region, type, addRecentSearch, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
 
   const canLoadMoreTrending = isShorts ? !!nextTokenDiscover : !!nextTokenTop;
   const canLoadMoreProfile = !!profileNextToken && !profileLoading && !profilePaging;
@@ -1210,6 +1275,7 @@ export default function App() {
         setProfileItems((prev) => (reset ? next : [...prev, ...next]));
         setProfileNextToken(payload.nextPageToken || null);
         setProfileResolvedChannelId(channelId || "");
+        if (reset) addRecentSearch({ tab: "profile", label: `Profile ${cleaned}` });
         if (reset) persistProfileSearch(cleaned);
       })
       .catch(async (primaryErr) => {
@@ -1224,6 +1290,7 @@ export default function App() {
           setProfileItems((prev) => (reset ? next : [...prev, ...next]));
           setProfileNextToken(fallbackPayload.nextPageToken || null);
           setProfileResolvedChannelId(channelId || "");
+          if (reset) addRecentSearch({ tab: "profile", label: `Profile ${cleaned}` });
           if (reset) persistProfileSearch(cleaned);
           showGlobalNotice("Profile loaded via compatibility path.", "info", 2600);
         } catch (fallbackErr) {
@@ -1312,7 +1379,6 @@ export default function App() {
   };
 
   const handleSearchClusterFromPreview = useCallback(() => {
-    if (!requirePro("Cluster search is a Pro-only feature.")) return;
     if (!previewItem) return;
     const clusterId = String(previewItem.cluster_id || previewItem.source_group || "").trim();
     const clusterName = String(previewItem.cluster_name || clusterId || "").trim();
@@ -1329,9 +1395,10 @@ export default function App() {
       setQuickClusterSearch({ context, clusterId, clusterName });
       setTab(context);
     }
+    addRecentCluster({ clusterId, clusterName, context });
     setPreviewItem(null);
     showGlobalNotice(`Cluster filter: ${clusterName || clusterId}`, "info", 2200);
-  }, [requirePro, previewItem, tab, showGlobalNotice]);
+  }, [previewItem, tab, addRecentCluster, showGlobalNotice]);
 
   useEffect(() => {
     if (!profileHasSearched) return;
@@ -1367,6 +1434,7 @@ export default function App() {
         updateGlobalLoading(loadingToken, "Ranking final winners...", 88);
         setWinnersItems(d.items || []);
         setWinnersMeta(d.meta || null);
+        addRecentSearch({ tab: "winners", label: `Winners ${winnersFormat} • ${winnersCategory} • ${region}` });
       })
       .catch((err) => {
         setWinnersError(err.message || "Failed to load winners.");
@@ -1386,6 +1454,7 @@ export default function App() {
     winnersWindowDays,
     winnersQuality,
     winnersMinQuality,
+    addRecentSearch,
     startGlobalLoading,
     updateGlobalLoading,
     endGlobalLoading,
@@ -1501,11 +1570,7 @@ export default function App() {
   }, [requirePro, scopedPatternSourceItems, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
 
   const saveCurrentPattern = useCallback(() => {
-    if (!isProUser) {
-      setPatternError("Saving patterns is a Pro feature.");
-      setPricingOpen(true);
-      return;
-    }
+    if (!requirePro("Saving patterns is a Pro feature.")) return;
     if (!patternClusters.length) {
       setPatternError("Extract patterns first before saving.");
       return;
@@ -1563,7 +1628,7 @@ export default function App() {
         endGlobalLoading(loadingToken);
       });
   }, [
-    isProUser,
+    requirePro,
     patternClusters,
     patternName,
     patternSource,
@@ -1706,11 +1771,7 @@ export default function App() {
   ]);
 
   const compareSavedPatterns = useCallback(() => {
-    if (!isProUser) {
-      setPatternError("Pattern comparison is a Pro feature.");
-      setPricingOpen(true);
-      return;
-    }
+    if (!requirePro("Pattern comparison is a Pro feature.")) return;
     const idA = String(comparePatternAId || "").trim();
     const idB = String(comparePatternBId || "").trim();
     if (!idA || !idB) {
@@ -1744,14 +1805,10 @@ export default function App() {
         setPatternComparing(false);
         endGlobalLoading(loadingToken);
       });
-  }, [isProUser, comparePatternAId, comparePatternBId, fetchPatternById, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
+  }, [requirePro, comparePatternAId, comparePatternBId, fetchPatternById, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
 
   const deleteSavedPattern = useCallback((patternId) => {
-    if (!isProUser) {
-      setPatternError("Pattern management is a Pro feature.");
-      setPricingOpen(true);
-      return;
-    }
+    if (!requirePro("Pattern management is a Pro feature.")) return;
     const targetId = String(patternId || "").trim();
     if (!targetId) return;
     setPatternError("");
@@ -1780,7 +1837,7 @@ export default function App() {
       })
       .finally(() => endGlobalLoading(loadingToken));
   }, [
-    isProUser,
+    requirePro,
     applyPatternId,
     comparePatternAId,
     comparePatternBId,
@@ -1793,11 +1850,7 @@ export default function App() {
   ]);
 
   const renameSavedPattern = useCallback((pattern) => {
-    if (!isProUser) {
-      setPatternError("Pattern management is a Pro feature.");
-      setPricingOpen(true);
-      return;
-    }
+    if (!requirePro("Pattern management is a Pro feature.")) return;
     const patternId = String(pattern?.pattern_id || "").trim();
     if (!patternId) return;
     const currentName = String(pattern?.name || "").trim();
@@ -1839,7 +1892,7 @@ export default function App() {
       })
       .finally(() => endGlobalLoading(loadingToken));
   }, [
-    isProUser,
+    requirePro,
     activePattern,
     startGlobalLoading,
     updateGlobalLoading,
@@ -1848,11 +1901,7 @@ export default function App() {
   ]);
 
   const editPatternNotes = useCallback((pattern) => {
-    if (!isProUser) {
-      setPatternError("Pattern management is a Pro feature.");
-      setPricingOpen(true);
-      return;
-    }
+    if (!requirePro("Pattern management is a Pro feature.")) return;
     const patternId = String(pattern?.pattern_id || "").trim();
     if (!patternId) return;
     const currentNotes = String(pattern?.notes || "").trim();
@@ -1889,7 +1938,7 @@ export default function App() {
       })
       .finally(() => endGlobalLoading(loadingToken));
   }, [
-    isProUser,
+    requirePro,
     activePattern,
     startGlobalLoading,
     updateGlobalLoading,
@@ -1898,11 +1947,7 @@ export default function App() {
   ]);
 
   const togglePinnedPattern = useCallback((pattern) => {
-    if (!isProUser) {
-      setPatternError("Pattern management is a Pro feature.");
-      setPricingOpen(true);
-      return;
-    }
+    if (!requirePro("Pattern management is a Pro feature.")) return;
     const patternId = String(pattern?.pattern_id || "").trim();
     if (!patternId) return;
     const nextPinned = !Boolean(pattern?.pinned);
@@ -1935,7 +1980,7 @@ export default function App() {
       })
       .finally(() => endGlobalLoading(loadingToken));
   }, [
-    isProUser,
+    requirePro,
     activePattern,
     startGlobalLoading,
     updateGlobalLoading,
@@ -1944,11 +1989,7 @@ export default function App() {
   ]);
 
   const cloneSavedPattern = useCallback((patternId) => {
-    if (!isProUser) {
-      setPatternError("Pattern management is a Pro feature.");
-      setPricingOpen(true);
-      return;
-    }
+    if (!requirePro("Pattern management is a Pro feature.")) return;
     const targetId = String(patternId || "").trim();
     if (!targetId) return;
     setPatternError("");
@@ -1972,7 +2013,7 @@ export default function App() {
       })
       .finally(() => endGlobalLoading(loadingToken));
   }, [
-    isProUser,
+    requirePro,
     startGlobalLoading,
     updateGlobalLoading,
     endGlobalLoading,
@@ -1989,11 +2030,7 @@ export default function App() {
   }, []);
 
   const bulkDeleteSelectedPatterns = useCallback(() => {
-    if (!isProUser) {
-      setPatternError("Pattern management is a Pro feature.");
-      setPricingOpen(true);
-      return;
-    }
+    if (!requirePro("Pattern management is a Pro feature.")) return;
     if (!selectedPatternIds.length) {
       setPatternError("Select at least one pattern to bulk delete.");
       return;
@@ -2022,7 +2059,7 @@ export default function App() {
       })
       .finally(() => endGlobalLoading(loadingToken));
   }, [
-    isProUser,
+    requirePro,
     selectedPatternIds,
     startGlobalLoading,
     updateGlobalLoading,
@@ -2073,6 +2110,15 @@ export default function App() {
     [appliedPatternItems, selectedClusterFilters, doesItemMatchClusters]
   );
 
+  const patternGridPortraitMode = useMemo(() => {
+    if (patternExtractFormat === "shorts") return true;
+    if (patternExtractFormat === "videos") return false;
+    const sample = (filteredAppliedPatternItems.length ? filteredAppliedPatternItems : filteredPatternItems).slice(0, 12);
+    if (!sample.length) return false;
+    const shortsCount = sample.filter((item) => isLikelyShort(item)).length;
+    return shortsCount >= Math.ceil(sample.length * 0.6);
+  }, [patternExtractFormat, filteredPatternItems, filteredAppliedPatternItems]);
+
   const clusterAvailability = useMemo(() => {
     const byId = {};
     for (const cluster of patternClusters) {
@@ -2088,17 +2134,19 @@ export default function App() {
     if (!requirePro("Patterns are a Pro-only feature.")) return;
     const targetId = String(clusterId || "").trim();
     if (!targetId) return;
+    const clusterMeta = patternClusters.find((cluster) => cluster.cluster_id === targetId);
+    addRecentCluster({
+      clusterId: targetId,
+      clusterName: clusterMeta?.display_name || targetId,
+      context: "patterns",
+    });
     setSelectedClusterFilters((prev) =>
       prev.includes(targetId) ? prev.filter((id) => id !== targetId) : [...prev, targetId]
     );
-  }, [requirePro]);
+  }, [requirePro, patternClusters, addRecentCluster]);
 
   const exportPatternLibrary = useCallback(() => {
-    if (!isProUser) {
-      setPatternError("Pattern export is a Pro feature.");
-      setPricingOpen(true);
-      return;
-    }
+    if (!requirePro("Pattern export is a Pro feature.")) return;
     setPatternError("");
     const loadingToken = startGlobalLoading("Exporting pattern library...", 26);
     fetch(`${apiUrl("/patterns/export")}?pinned_only=${patternPinnedOnly ? "1" : "0"}`)
@@ -2125,7 +2173,7 @@ export default function App() {
       })
       .finally(() => endGlobalLoading(loadingToken));
   }, [
-    isProUser,
+    requirePro,
     patternPinnedOnly,
     startGlobalLoading,
     updateGlobalLoading,
@@ -2134,11 +2182,7 @@ export default function App() {
   ]);
 
   const importPatternLibrary = useCallback((event) => {
-    if (!isProUser) {
-      setPatternError("Pattern import is a Pro feature.");
-      setPricingOpen(true);
-      return;
-    }
+    if (!requirePro("Pattern import is a Pro feature.")) return;
     const file = event?.target?.files?.[0];
     if (!file) return;
     const reader = new FileReader();
@@ -2183,7 +2227,7 @@ export default function App() {
     };
     reader.readAsText(file);
   }, [
-    isProUser,
+    requirePro,
     startGlobalLoading,
     updateGlobalLoading,
     endGlobalLoading,
@@ -2255,11 +2299,7 @@ export default function App() {
   }, [savedPatterns, selectedPatternIds]);
 
   const exportCompareCsv = useCallback(() => {
-    if (!isProUser) {
-      setPatternError("Export is a Pro feature.");
-      setPricingOpen(true);
-      return;
-    }
+    if (!requirePro("Export is a Pro feature.")) return;
     if (!compareResult || !compareRows.length) {
       setPatternError("No comparison data available to export.");
       return;
@@ -2289,7 +2329,7 @@ export default function App() {
     link.remove();
     URL.revokeObjectURL(url);
     showGlobalNotice("Comparison exported as CSV.", "info", 2600);
-  }, [isProUser, compareResult, compareRows, showGlobalNotice]);
+  }, [requirePro, compareResult, compareRows, showGlobalNotice]);
 
   return (
     <div
@@ -2325,14 +2365,7 @@ export default function App() {
           <button onClick={() => setTab("profile")} style={tabButtonStyle(tab === "profile")}>Profile</button>
           <button onClick={() => setTab("winners")} style={tabButtonStyle(tab === "winners")}>Winners</button>
           <button
-            onClick={() => {
-              if (!isProUser) {
-                setPatternError("Patterns are available on Pro.");
-                setPricingOpen(true);
-                return;
-              }
-              setTab("patterns");
-            }}
+            onClick={() => setTab("patterns")}
             style={tabButtonStyle(tab === "patterns")}
           >
             Patterns
@@ -2581,25 +2614,23 @@ export default function App() {
             {winnersLoading ? (
               <div style={{ minHeight: 240 }} />
             ) : (
-              <ThumbnailGrid items={filteredWinnersItems} portraitMode={winnersFormat === "shorts"} gridContext="winners" />
+              <ThumbnailGrid
+                items={filteredWinnersItems}
+                portraitMode={winnersFormat === "shorts"}
+                gridContext="winners"
+                enableGroupHoverHighlight={false}
+              />
             )}
           </>
         )}
 
         {tab === "patterns" && (
           <>
-            {!isProUser ? (
-              <div style={{ ...infoBoxStyle, marginTop: 12, borderRadius: 14, padding: "18px 14px", textAlign: "center" }}>
-                <div style={{ fontSize: 16, fontWeight: 700 }}>Patterns is a Pro Feature</div>
-                <div style={{ fontSize: 13, marginTop: 8, opacity: 0.85 }}>
-                  Save, compare, and apply cluster intelligence across channels.
-                </div>
-                <button type="button" style={{ ...actionButtonStyle(false), marginTop: 12 }} onClick={() => setPricingOpen(true)}>
-                  Unlock Pro
-                </button>
+            {!isProUser && (
+              <div style={{ ...infoBoxStyle, marginTop: 12, borderRadius: 14, padding: "10px 12px", textAlign: "center", fontSize: 12 }}>
+                Patterns are available for all users. Pro adds higher limits and advanced automation.
               </div>
-            ) : (
-              <>
+            )}
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "center", marginTop: 10 }}>
               <input
                 value={patternLibraryQuery}
@@ -3057,7 +3088,7 @@ export default function App() {
             )}
 
             {!!patternItems.length && (
-              <ThumbnailGrid gridContext="patterns" items={filteredPatternItems.map((item) => ({
+              <ThumbnailGrid gridContext="patterns" portraitMode={patternGridPortraitMode} items={filteredPatternItems.map((item) => ({
                 id: item.video_id || item.thumbnail_url,
                 title: item.title || item.cluster_id || "Pattern Item",
                 channelTitle: item.channel_title || item.features?.quality_band || "Pattern",
@@ -3085,7 +3116,7 @@ export default function App() {
                     </span>
                   )}
                 </div>
-                <ThumbnailGrid gridContext="patterns" items={filteredAppliedPatternItems.map((item) => ({
+                <ThumbnailGrid gridContext="patterns" portraitMode={patternGridPortraitMode} items={filteredAppliedPatternItems.map((item) => ({
                   id: item.video_id || item.thumbnail_url,
                   title: item.title || "Matched Thumbnail",
                   channelTitle: `${item.channel_title || item.features?.quality_band || "Match"} | similarity ${Math.round(Number(item.match_similarity || 0) * 100)}%`,
@@ -3099,35 +3130,108 @@ export default function App() {
                 }))} />
               </>
             )}
-              </>
-            )}
           </>
         )}
       </div>
 
       <button
-        onClick={() => setDarkMode((prev) => !prev)}
-        style={{
-          position: "fixed",
-          bottom: 16,
-          left: 16,
-          zIndex: 20,
-          width: 48,
-          height: 48,
-          borderRadius: "50%",
-          padding: 0,
-          background: darkMode ? "#fff" : "#050505",
-          color: darkMode ? "#050505" : "#fff",
-          border: "none",
-          boxShadow: "0 8px 20px rgba(0,0,0,0.25)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 18,
-        }}
+        type="button"
+        className={`app-side-toggle ${darkMode ? "app-side-toggle--dark" : "app-side-toggle--light"}`}
+        onClick={() => setSidebarOpen((prev) => !prev)}
+        aria-label={sidebarOpen ? "Close sidebar" : "Open sidebar"}
       >
-        {darkMode ? "\u2600\uFE0F" : "\uD83C\uDF19"}
+        {sidebarOpen ? "\u2715" : "\u2630"}
       </button>
+      <aside className={`app-sidebar ${sidebarOpen ? "app-sidebar--open" : ""} ${darkMode ? "app-sidebar--dark" : "app-sidebar--light"}`}>
+        <div className="app-sidebar__section">
+          <div className="app-sidebar__title">Account</div>
+          <div className="app-sidebar__row">
+            <button
+              type="button"
+              className="app-sidebar__btn"
+              onClick={() => showGlobalNotice("Login is coming soon.", "info", 2200)}
+            >
+              Login
+            </button>
+            <button
+              type="button"
+              className="app-sidebar__btn app-sidebar__btn--accent"
+              onClick={() => setPricingOpen(true)}
+            >
+              {isProUser ? "Manage Pro" : "Join Pro"}
+            </button>
+          </div>
+          <button type="button" className="app-sidebar__btn" onClick={() => setDarkMode((prev) => !prev)}>
+            Theme: {darkMode ? "Dark" : "Light"}
+          </button>
+        </div>
+
+        <div className="app-sidebar__section">
+          <div className="app-sidebar__title">Recent Searches</div>
+          <div className="app-sidebar__list">
+            {recentSearches.slice(0, 8).map((entry) => (
+              <button
+                key={`${entry.tab}-${entry.label}-${entry.ts}`}
+                type="button"
+                className="app-sidebar__chip"
+                onClick={() => setTab(entry.tab || "trending")}
+              >
+                {entry.label}
+              </button>
+            ))}
+            {!recentSearches.length && <div className="app-sidebar__empty">No recent searches yet.</div>}
+          </div>
+        </div>
+
+        <div className="app-sidebar__section">
+          <div className="app-sidebar__title">Recent Clusters</div>
+          <div className="app-sidebar__list">
+            {recentClusters.slice(0, 8).map((entry) => (
+              <button
+                key={`${entry.context}-${entry.clusterId}-${entry.ts}`}
+                type="button"
+                className="app-sidebar__chip"
+                onClick={() => {
+                  if (entry.context === "patterns") {
+                    setTab("patterns");
+                    setSelectedClusterFilters([entry.clusterId]);
+                  } else {
+                    setTab(entry.context || "trending");
+                    setQuickClusterSearch({
+                      context: entry.context || "trending",
+                      clusterId: entry.clusterId,
+                      clusterName: entry.clusterName || entry.clusterId,
+                    });
+                  }
+                }}
+              >
+                {entry.clusterName || entry.clusterId}
+              </button>
+            ))}
+            {!recentClusters.length && <div className="app-sidebar__empty">No cluster history yet.</div>}
+          </div>
+        </div>
+
+        <div className="app-sidebar__section">
+          <div className="app-sidebar__title">Saved Patterns</div>
+          <div className="app-sidebar__list">
+            {savedPatterns.slice(0, 8).map((pattern) => (
+              <button
+                key={pattern.pattern_id}
+                type="button"
+                className="app-sidebar__chip"
+                onClick={() => {
+                  setTab("patterns");
+                  setApplyPatternId(pattern.pattern_id);
+                }}
+              >
+                {pattern.name}
+              </button>
+            ))}
+            {!savedPatterns.length && <div className="app-sidebar__empty">No saved patterns yet.</div>}
+          </div>
+        </div>
+      </aside>
       <ProPrompt
         open={proPrompt.open}
         darkMode={darkMode}
