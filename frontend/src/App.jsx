@@ -296,23 +296,30 @@ function LoadMoreButton({ onClick, disabled, style }) {
   );
 }
 
-function FloatingProgress({ active, message, progress, darkMode }) {
-  if (!active) return null;
+function FloatingProgress({ active, message, progress, darkMode, noticeMessage = "", noticeTone = "info" }) {
+  if (!active && !noticeMessage) return null;
+  const showProgress = active;
   return (
     <>
-      <div className="floating-progress-backdrop" />
+      {showProgress && <div className="floating-progress-backdrop" />}
       <div className={`floating-progress ${darkMode ? "floating-progress--dark" : "floating-progress--light"}`}>
         <div className="floating-progress__head">
           <div className="floating-progress__spinner" />
           <div className="floating-progress__titles">
-            <div className="floating-progress__label">Processing Request</div>
-            <div className="floating-progress__text">{message}</div>
+            <div className="floating-progress__label">{showProgress ? "Processing Request" : "Status"}</div>
+            <div className="floating-progress__text">{showProgress ? message : noticeMessage}</div>
           </div>
-          <div className="floating-progress__percent">{Math.max(0, Math.min(100, Math.round(progress)))}%</div>
+          {showProgress ? (
+            <div className="floating-progress__percent">{Math.max(0, Math.min(100, Math.round(progress)))}%</div>
+          ) : (
+            <div className={`floating-progress__badge floating-progress__badge--${noticeTone}`}>Quota</div>
+          )}
         </div>
-        <div className="floating-progress__track">
-          <div className="floating-progress__bar" style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} />
-        </div>
+        {showProgress && (
+          <div className="floating-progress__track">
+            <div className="floating-progress__bar" style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} />
+          </div>
+        )}
       </div>
     </>
   );
@@ -448,7 +455,9 @@ export default function App() {
 
   const [darkMode, setDarkMode] = useState(() => readCookie("darkMode") === "1");
   const [globalLoading, setGlobalLoading] = useState({ active: false, message: "", progress: 0 });
+  const [globalNotice, setGlobalNotice] = useState({ message: "", tone: "info" });
   const loadingTokenRef = useRef(0);
+  const noticeTimeoutRef = useRef(null);
   const [previewItem, setPreviewItem] = useState(null);
 
   const isShorts = type === "shorts";
@@ -477,6 +486,16 @@ export default function App() {
       if (loadingTokenRef.current !== token) return;
       setGlobalLoading({ active: false, message: "", progress: 0 });
     }, 220);
+  }, []);
+
+  const showGlobalNotice = useCallback((message, tone = "info", durationMs = 5200) => {
+    if (!message) return;
+    if (noticeTimeoutRef.current) window.clearTimeout(noticeTimeoutRef.current);
+    setGlobalNotice({ message, tone });
+    noticeTimeoutRef.current = window.setTimeout(() => {
+      setGlobalNotice({ message: "", tone: "info" });
+      noticeTimeoutRef.current = null;
+    }, durationMs);
   }, []);
 
   const handleTrendingTypeChange = (nextType) => {
@@ -538,6 +557,12 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [previewItem]);
 
+  useEffect(() => {
+    return () => {
+      if (noticeTimeoutRef.current) window.clearTimeout(noticeTimeoutRef.current);
+    };
+  }, []);
+
   const buildParams = (pageToken = null) => {
     if (isShorts) {
       const p =
@@ -574,6 +599,9 @@ export default function App() {
       })
       .catch((err) => {
         setTrendingError(err.message || "Failed to load trending feed.");
+        if (isQuotaErrorText(err.message)) {
+          showGlobalNotice("YouTube quota exhausted. Showing cached results where possible.", "warn");
+        }
         setNextTokenTop(null);
         setNextTokenDiscover(null);
       })
@@ -604,6 +632,9 @@ export default function App() {
       })
       .catch((err) => {
         setTrendingError(err.message || "Failed to load more thumbnails.");
+        if (isQuotaErrorText(err.message)) {
+          showGlobalNotice("Quota limit reached while loading more. Keeping current grid.", "warn");
+        }
       })
       .finally(() => endGlobalLoading(loadingToken));
   };
@@ -670,6 +701,9 @@ export default function App() {
       })
       .catch((err) => {
         setProfileError(err.message || "Failed to load profile feed.");
+        if (isQuotaErrorText(err.message)) {
+          showGlobalNotice("YouTube quota exhausted. Profile results may be partial.", "warn");
+        }
       })
       .finally(() => {
         setProfileLoading(false);
@@ -755,6 +789,9 @@ export default function App() {
       })
       .catch((err) => {
         setWinnersError(err.message || "Failed to load winners.");
+        if (isQuotaErrorText(err.message)) {
+          showGlobalNotice("YouTube quota exhausted. Keeping previous winners visible.", "warn");
+        }
       })
       .finally(() => {
         setWinnersLoading(false);
@@ -847,6 +884,8 @@ export default function App() {
         message={globalLoading.message}
         progress={globalLoading.progress}
         darkMode={darkMode}
+        noticeMessage={globalNotice.message}
+        noticeTone={globalNotice.tone}
       />
       <ThumbnailPreviewModal
         item={previewItem}

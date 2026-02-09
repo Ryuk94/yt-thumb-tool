@@ -3,6 +3,7 @@ import os
 import re
 import time
 import json
+import uuid
 import subprocess
 import sys
 import threading
@@ -16,6 +17,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field
 try:
     from backend.app.services.thumb_quality import analyze_thumbnail
 except ModuleNotFoundError:
@@ -86,6 +88,7 @@ CACHE: dict[str, tuple[float, Any]] = {}
 CACHE_TTL_SECONDS = 60 * 30  # 30 minutes
 SHORTS_DETECT_CACHE: dict[str, tuple[float, bool]] = {}
 SHORTS_DETECT_TTL_SECONDS = 60 * 60 * 6  # 6 hours
+PATTERN_LIBRARY: dict[str, dict[str, Any]] = {}
 
 def cache_get(key: str):
     hit = CACHE.get(key)
@@ -103,6 +106,28 @@ def cache_set(key: str, value: Any):
 
 def cache_set_custom(key: str, value: Any, ttl: int):
     CACHE[key] = (time.time() + ttl, value)
+
+
+class ResolveRequest(BaseModel):
+    query: str
+
+
+class PatternExtractItem(BaseModel):
+    thumbnail_url: str
+    video_id: str | None = None
+    title: str | None = None
+    channel_title: str | None = None
+
+
+class PatternExtractRequest(BaseModel):
+    items: list[PatternExtractItem] = Field(default_factory=list)
+
+
+class PatternSaveRequest(BaseModel):
+    name: str
+    clusters: list[dict[str, Any]] = Field(default_factory=list)
+    filters: dict[str, Any] = Field(default_factory=dict)
+    notes: str | None = None
 
 
 class YouTubeQuotaExceededError(Exception):
@@ -1525,9 +1550,136 @@ def is_quota_exceeded_error(exc: Exception) -> bool:
     )
 
 
+def _quality_band(score: int) -> str:
+    if score >= 80:
+        return "high"
+    if score >= 60:
+        return "good"
+    if score >= 40:
+        return "medium"
+    return "low"
+
+
+def _clutter_band(score: int) -> str:
+    if score <= 30:
+        return "clean"
+    if score <= 55:
+        return "moderate"
+    return "busy"
+
+
+def _extract_pattern_item(item: PatternExtractItem) -> dict[str, Any]:
+    insights = analyze_thumbnail(item.thumbnail_url)
+    quality_score = int(insights.get("quality_score") or 0)
+    clutter_score = int(insights.get("clutter_score") or 0)
+    aspect_orientation = str(insights.get("aspect_orientation") or "unknown")
+    has_face = bool(insights.get("has_face"))
+    text_present = bool(insights.get("text_present"))
+    signature = (
+        f"ar:{aspect_orientation}|face:{int(has_face)}|text:{int(text_present)}|"
+        f"quality:{_quality_band(quality_score)}|clutter:{_clutter_band(clutter_score)}"
+    )
+    return {
+        "video_id": item.video_id,
+        "title": item.title,
+        "channel_title": item.channel_title,
+        "thumbnail_url": item.thumbnail_url,
+        "features": {
+            "has_face": has_face,
+            "text_present": text_present,
+            "aspect_orientation": aspect_orientation,
+            "quality_score": quality_score,
+            "quality_band": _quality_band(quality_score),
+            "clutter_score": clutter_score,
+            "clutter_band": _clutter_band(clutter_score),
+            "dominant_color": "unknown",
+            "composition": "auto",
+        },
+        "cluster_signature": signature,
+    }
+
+
 @app.get("/health")
 def health():
     return {"ok": True}
+
+
+@app.post("/resolve")
+def resolve_channel(payload: ResolveRequest, request: Request):
+    query = (payload.query or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="query is required")
+    enforce_api_rate_limit(request, scope="resolve")
+    channel_id = resolve_channel_id_safely_cached(query)
+    return {"query": query, "channel_id": channel_id}
+
+
+@app.post("/patterns/extract")
+def extract_patterns(payload: PatternExtractRequest, request: Request):
+    if not payload.items:
+        raise HTTPException(status_code=400, detail="items must contain at least one thumbnail")
+    enforce_api_rate_limit(request, scope="patterns_extract")
+
+    enriched_items = [_extract_pattern_item(item) for item in payload.items]
+    clusters_by_signature: dict[str, list[dict[str, Any]]] = {}
+    for item in enriched_items:
+        key = item["cluster_signature"]
+        clusters_by_signature.setdefault(key, []).append(item)
+
+    clusters: list[dict[str, Any]] = []
+    for idx, (signature, members) in enumerate(clusters_by_signature.items(), start=1):
+        cluster_id = f"cluster_{idx}"
+        for member in members:
+            member["cluster_id"] = cluster_id
+        clusters.append(
+            {
+                "cluster_id": cluster_id,
+                "signature": signature,
+                "count": len(members),
+            }
+        )
+
+    return {
+        "items": enriched_items,
+        "clusters": clusters,
+        "meta": {
+            "input_count": len(payload.items),
+            "cluster_count": len(clusters),
+        },
+    }
+
+
+@app.post("/patterns/save")
+def save_pattern(payload: PatternSaveRequest, request: Request):
+    name = (payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    enforce_api_rate_limit(request, scope="patterns_save")
+
+    pattern_id = uuid.uuid4().hex[:12]
+    entry = {
+        "pattern_id": pattern_id,
+        "name": name,
+        "clusters": payload.clusters,
+        "filters": payload.filters,
+        "notes": payload.notes,
+        "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+    PATTERN_LIBRARY[pattern_id] = entry
+    return {
+        "ok": True,
+        "pattern_id": pattern_id,
+        "pattern": entry,
+    }
+
+
+@app.get("/patterns/apply/{pattern_id}")
+def apply_pattern(pattern_id: str, request: Request):
+    enforce_api_rate_limit(request, scope="patterns_apply")
+    pattern = PATTERN_LIBRARY.get(pattern_id)
+    if not pattern:
+        raise HTTPException(status_code=404, detail="Pattern not found")
+    return {"pattern_id": pattern_id, "pattern": pattern}
 
 
 @app.get("/top")

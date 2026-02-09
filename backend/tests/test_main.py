@@ -272,3 +272,50 @@ def test_global_winners_quality_filter(monkeypatch):
     assert effective_min == 60
     assert with_quality["meta"].get("quality_relaxed") is False
     assert all(item["thumb_insights"]["quality_score"] >= effective_min for item in with_quality["items"])
+
+
+def test_resolve_endpoint(monkeypatch):
+    monkeypatch.setattr(main_module, "resolve_channel_id_safely_cached", lambda _query: "UC_RESOLVED")
+    payload = main_module.resolve_channel(main_module.ResolveRequest(query="@creator"), make_request())
+    assert payload["channel_id"] == "UC_RESOLVED"
+
+
+def test_patterns_extract_save_apply(monkeypatch):
+    monkeypatch.setattr(
+        main_module,
+        "analyze_thumbnail",
+        lambda _url: {
+            "has_face": True,
+            "text_present": False,
+            "aspect_orientation": "portrait",
+            "quality_score": 82,
+            "clutter_score": 20,
+        },
+    )
+
+    extract_response = main_module.extract_patterns(
+        main_module.PatternExtractRequest(
+            items=[
+                main_module.PatternExtractItem(thumbnail_url="https://img/a.jpg", video_id="a"),
+                main_module.PatternExtractItem(thumbnail_url="https://img/b.jpg", video_id="b"),
+            ]
+        ),
+        make_request(),
+    )
+    extracted = extract_response
+    assert extracted["meta"]["input_count"] == 2
+    assert extracted["meta"]["cluster_count"] >= 1
+    assert extracted["items"][0]["cluster_id"].startswith("cluster_")
+
+    save_response = main_module.save_pattern(
+        main_module.PatternSaveRequest(
+            name="portrait-face",
+            clusters=extracted["clusters"],
+            filters={"min_quality": 60},
+        ),
+        make_request(),
+    )
+    pattern_id = save_response["pattern_id"]
+
+    applied = main_module.apply_pattern(pattern_id, make_request())
+    assert applied["pattern"]["name"] == "portrait-face"

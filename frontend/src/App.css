@@ -164,6 +164,28 @@
   transition: width 180ms ease-out;
 }
 
+.floating-progress__badge {
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 56px;
+  text-align: center;
+  border-radius: 999px;
+  padding: 5px 10px;
+  letter-spacing: 0.02em;
+}
+
+.floating-progress__badge--warn {
+  color: #fff;
+  background: linear-gradient(90deg, #f25c2a, #ff3b3f);
+  box-shadow: 0 8px 18px rgba(255, 72, 38, 0.28);
+}
+
+.floating-progress__badge--info {
+  color: #fff;
+  background: linear-gradient(90deg, #3b82f6, #2563eb);
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.28);
+}
+
 button:not(:disabled),
 .thumb-card {
   transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
