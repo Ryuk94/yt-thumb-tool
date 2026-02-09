@@ -1900,6 +1900,24 @@ def export_patterns(request: Request, pinned_only: int = 0):
     }
 
 
+@app.get("/patterns/stats")
+def pattern_stats(request: Request):
+    enforce_api_rate_limit(request, scope="patterns_stats")
+    with PATTERN_LIBRARY_LOCK:
+        rows = list(PATTERN_LIBRARY.values())
+    total = len(rows)
+    pinned = sum(1 for row in rows if bool(row.get("pinned")))
+    with_notes = sum(1 for row in rows if str(row.get("notes") or "").strip())
+    total_clusters = sum(len(row.get("clusters") or []) for row in rows)
+    avg_clusters = (float(total_clusters) / float(total)) if total else 0.0
+    return {
+        "total": total,
+        "pinned": pinned,
+        "with_notes": with_notes,
+        "avg_clusters": round(avg_clusters, 2),
+    }
+
+
 @app.post("/patterns/import")
 def import_patterns(payload: PatternImportRequest, request: Request):
     enforce_api_rate_limit(request, scope="patterns_import")

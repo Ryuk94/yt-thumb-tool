@@ -572,6 +572,7 @@ export default function App() {
   const [patternPinnedOnly, setPatternPinnedOnly] = useState(false);
   const [patternLibraryMeta, setPatternLibraryMeta] = useState({ total: 0 });
   const [selectedPatternIds, setSelectedPatternIds] = useState([]);
+  const [patternStats, setPatternStats] = useState(null);
 
   const [darkMode, setDarkMode] = useState(() => readCookie("darkMode") === "1");
   const [globalLoading, setGlobalLoading] = useState({ active: false, message: "", progress: 0 });
@@ -725,6 +726,23 @@ export default function App() {
         if (!silent) setPatternError(err.message || "Failed to load saved patterns.");
       });
   }, [patternLibraryQuery, patternLibrarySort, patternPinnedOnly, patternLibraryLimit, patternLibraryOffset]);
+
+  const fetchPatternStats = useCallback(() => {
+    fetch(apiUrl("/patterns/stats"))
+      .then(async (r) => {
+        if (!r.ok) throw new Error(await readApiErrorDetail(r, "Failed to load pattern stats."));
+        return r.json();
+      })
+      .then((payload) => setPatternStats(payload || null))
+      .catch(() => {
+        // keep UI resilient if stats endpoint is unavailable
+      });
+  }, []);
+
+  useEffect(() => {
+    if (tab !== "patterns") return;
+    fetchPatternStats();
+  }, [tab, savedPatterns, fetchPatternStats]);
 
   useEffect(() => {
     const onOpenPreview = (event) => {
@@ -1066,8 +1084,11 @@ export default function App() {
   }, [tab, winnersFormat, winnersCategory, region, winnersLimit, winnersWindowDays, winnersQuality, winnersMinQuality, requestWinners]);
 
   useEffect(() => {
-    if (tab === "patterns") fetchSavedPatterns(true);
-  }, [tab, fetchSavedPatterns]);
+    if (tab === "patterns") {
+      fetchSavedPatterns(true);
+      fetchPatternStats();
+    }
+  }, [tab, fetchSavedPatterns, fetchPatternStats]);
 
   useEffect(() => {
     if (tab !== "patterns") return;
@@ -2213,6 +2234,14 @@ export default function App() {
             {patternLibraryMeta?.total != null && (
               <div style={{ marginTop: 8, fontSize: 12, textAlign: "center", opacity: 0.82 }}>
                 Saved patterns: {patternLibraryMeta.total}
+              </div>
+            )}
+            {patternStats && (
+              <div style={{ marginTop: 8, display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap", fontSize: 12 }}>
+                <span>Total: {patternStats.total}</span>
+                <span>Pinned: {patternStats.pinned}</span>
+                <span>With Notes: {patternStats.with_notes}</span>
+                <span>Avg Clusters: {patternStats.avg_clusters}</span>
               </div>
             )}
             {!!selectedPatternIds.length && (

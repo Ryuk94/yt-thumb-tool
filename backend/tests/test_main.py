@@ -595,3 +595,22 @@ def test_pattern_bulk_delete(monkeypatch, tmp_path):
     listed = main_module.list_patterns(make_request())
     assert len(listed["items"]) == 1
     assert listed["items"][0]["pattern_id"] == b["pattern_id"]
+
+
+def test_pattern_stats(monkeypatch, tmp_path):
+    main_module.PATTERN_LIBRARY.clear()
+    monkeypatch.setattr(main_module, "PATTERN_LIBRARY_FILE", tmp_path / "pattern_library.json")
+    a = main_module.save_pattern(
+        main_module.PatternSaveRequest(name="A", clusters=[{"cluster_id": "c1"}], filters={}, notes="x"),
+        make_request(),
+    )
+    b = main_module.save_pattern(
+        main_module.PatternSaveRequest(name="B", clusters=[{"cluster_id": "c1"}, {"cluster_id": "c2"}], filters={}),
+        make_request(),
+    )
+    main_module.update_pattern(a["pattern_id"], main_module.PatternUpdateRequest(pinned=True), make_request())
+    stats = main_module.pattern_stats(make_request())
+    assert stats["total"] == 2
+    assert stats["pinned"] == 1
+    assert stats["with_notes"] == 1
+    assert stats["avg_clusters"] == 1.5
