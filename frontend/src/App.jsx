@@ -568,6 +568,7 @@ export default function App() {
   const [patternLibraryQuery, setPatternLibraryQuery] = useState("");
   const [patternLibrarySort, setPatternLibrarySort] = useState("recent");
   const [patternLibraryLimit, setPatternLibraryLimit] = useState(100);
+  const [patternLibraryOffset, setPatternLibraryOffset] = useState(0);
   const [patternLibraryMeta, setPatternLibraryMeta] = useState({ total: 0 });
 
   const [darkMode, setDarkMode] = useState(() => readCookie("darkMode") === "1");
@@ -695,7 +696,7 @@ export default function App() {
       query: patternLibraryQuery,
       sort: patternLibrarySort,
       limit: String(patternLibraryLimit),
-      offset: "0",
+      offset: String(patternLibraryOffset),
     });
     fetch(`${apiUrl("/patterns")}?${params.toString()}`)
       .then(async (r) => {
@@ -714,7 +715,7 @@ export default function App() {
       .catch((err) => {
         if (!silent) setPatternError(err.message || "Failed to load saved patterns.");
       });
-  }, [patternLibraryQuery, patternLibrarySort, patternLibraryLimit]);
+  }, [patternLibraryQuery, patternLibrarySort, patternLibraryLimit, patternLibraryOffset]);
 
   useEffect(() => {
     const onOpenPreview = (event) => {
@@ -1063,7 +1064,11 @@ export default function App() {
     if (tab !== "patterns") return;
     const timeout = window.setTimeout(() => fetchSavedPatterns(true), 180);
     return () => window.clearTimeout(timeout);
-  }, [tab, patternLibraryQuery, patternLibrarySort, patternLibraryLimit, fetchSavedPatterns]);
+  }, [tab, patternLibraryQuery, patternLibrarySort, patternLibraryLimit, patternLibraryOffset, fetchSavedPatterns]);
+
+  useEffect(() => {
+    setPatternLibraryOffset(0);
+  }, [patternLibraryQuery, patternLibrarySort, patternLibraryLimit]);
 
   useEffect(() => {
     setAppliedPatternItems([]);
@@ -1945,6 +1950,32 @@ export default function App() {
             {patternLibraryMeta?.total != null && (
               <div style={{ marginTop: 8, fontSize: 12, textAlign: "center", opacity: 0.82 }}>
                 Saved patterns: {patternLibraryMeta.total}
+              </div>
+            )}
+            {patternLibraryMeta?.total != null && (
+              <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center", justifyContent: "center" }}>
+                <button
+                  type="button"
+                  onClick={() => setPatternLibraryOffset((prev) => Math.max(0, prev - Number(patternLibraryLimit || 25)))}
+                  disabled={patternLibraryOffset <= 0}
+                  style={tabButtonStyle(false)}
+                >
+                  Prev
+                </button>
+                <div style={{ fontSize: 12, opacity: 0.86 }}>
+                  {Math.min(patternLibraryMeta.total, patternLibraryOffset + 1)}-
+                  {Math.min(patternLibraryMeta.total, patternLibraryOffset + Number(patternLibraryLimit || 25))}
+                  {" / "}
+                  {patternLibraryMeta.total}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPatternLibraryOffset((prev) => prev + Number(patternLibraryLimit || 25))}
+                  disabled={patternLibraryOffset + Number(patternLibraryLimit || 25) >= Number(patternLibraryMeta.total || 0)}
+                  style={tabButtonStyle(false)}
+                >
+                  Next
+                </button>
               </div>
             )}
 
