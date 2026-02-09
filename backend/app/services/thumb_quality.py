@@ -1,6 +1,7 @@
 import hashlib
 import io
 import time
+import colorsys
 from typing import Any
 
 import requests
@@ -53,6 +54,8 @@ def _empty_insights() -> dict[str, Any]:
         "clutter_score": 0,
         "contrast_score": 0,
         "quality_score": 0,
+        "dominant_color": "unknown",
+        "composition": "unknown",
     }
 
 
@@ -258,6 +261,81 @@ def compute_quality_score(
     return _clamp_int(score)
 
 
+def _dominant_color_name(image_rgb) -> str:
+    if np is None:
+        return "unknown"
+    try:
+        avg = np.mean(image_rgb.reshape(-1, 3), axis=0)
+        r, g, b = [float(v) / 255.0 for v in avg]
+        h, s, v = colorsys.rgb_to_hsv(r, g, b)
+        hue = h * 360.0
+
+        if v < 0.18:
+            return "black"
+        if s < 0.12 and v > 0.85:
+            return "white"
+        if s < 0.14:
+            return "gray"
+        if 15 <= hue < 40:
+            return "orange"
+        if 40 <= hue < 70:
+            return "yellow"
+        if 70 <= hue < 165:
+            return "green"
+        if 165 <= hue < 200:
+            return "cyan"
+        if 200 <= hue < 255:
+            return "blue"
+        if 255 <= hue < 295:
+            return "purple"
+        if 295 <= hue < 345:
+            return "pink"
+        return "red"
+    except Exception:
+        return "unknown"
+
+
+def _composition_style(gray_image) -> str:
+    if np is None:
+        return "unknown"
+    try:
+        if cv2 is not None:
+            grad_x = cv2.Sobel(gray_image, cv2.CV_32F, 1, 0, ksize=3)
+            grad_y = cv2.Sobel(gray_image, cv2.CV_32F, 0, 1, ksize=3)
+            energy = cv2.magnitude(grad_x, grad_y)
+        else:
+            grad_y, grad_x = np.gradient(gray_image.astype("float32"))
+            energy = np.sqrt((grad_x * grad_x) + (grad_y * grad_y))
+
+        total = float(np.sum(energy))
+        if total <= 1e-6:
+            return "minimal"
+
+        h, w = gray_image.shape[:2]
+        ys, xs = np.indices((h, w))
+        cx = float(np.sum(xs * energy) / total) / float(max(w - 1, 1))
+        cy = float(np.sum(ys * energy) / total) / float(max(h - 1, 1))
+
+        thirds = ((1.0 / 3.0, 1.0 / 3.0), (2.0 / 3.0, 1.0 / 3.0), (1.0 / 3.0, 2.0 / 3.0), (2.0 / 3.0, 2.0 / 3.0))
+        nearest_third = min((((cx - tx) ** 2 + (cy - ty) ** 2) ** 0.5) for tx, ty in thirds)
+
+        if 0.38 <= cx <= 0.62 and 0.38 <= cy <= 0.62:
+            return "centered"
+        if nearest_third <= 0.17:
+            return "rule_of_thirds"
+        if cy <= 0.34:
+            return "top_weighted"
+        if cy >= 0.66:
+            return "bottom_weighted"
+        if cx <= 0.34:
+            return "left_weighted"
+        if cx >= 0.66:
+            return "right_weighted"
+        return "balanced"
+    except Exception:
+        return "unknown"
+
+
 def analyze_thumbnail(thumbnail_url: str | None) -> dict[str, Any]:
     if not thumbnail_url:
         return _empty_insights()
@@ -311,6 +389,8 @@ def analyze_thumbnail(thumbnail_url: str | None) -> dict[str, Any]:
             clutter_score=clutter_score,
             contrast_score=contrast_score,
         )
+        dominant_color = _dominant_color_name(image_rgb)
+        composition = _composition_style(gray)
 
         insights = {
             "has_face": bool(has_face),
@@ -323,6 +403,8 @@ def analyze_thumbnail(thumbnail_url: str | None) -> dict[str, Any]:
             "clutter_score": int(clutter_score),
             "contrast_score": int(contrast_score),
             "quality_score": int(quality_score),
+            "dominant_color": dominant_color,
+            "composition": composition,
         }
     except Exception:
         insights = _empty_insights()

@@ -1646,8 +1646,8 @@ def _extract_pattern_item(item: PatternExtractItem) -> dict[str, Any]:
             "quality_band": _quality_band(quality_score),
             "clutter_score": clutter_score,
             "clutter_band": _clutter_band(clutter_score),
-            "dominant_color": "unknown",
-            "composition": "auto",
+            "dominant_color": str(insights.get("dominant_color") or "unknown"),
+            "composition": str(insights.get("composition") or "unknown"),
         },
         "cluster_signature": signature,
     }

@@ -349,6 +349,8 @@ def test_patterns_extract_save_apply(monkeypatch, tmp_path):
             "aspect_orientation": "portrait",
             "quality_score": 82,
             "clutter_score": 20,
+            "dominant_color": "blue",
+            "composition": "centered",
         },
     )
 
@@ -365,6 +367,8 @@ def test_patterns_extract_save_apply(monkeypatch, tmp_path):
     assert extracted["meta"]["input_count"] == 2
     assert extracted["meta"]["cluster_count"] >= 1
     assert extracted["items"][0]["cluster_id"].startswith("cluster_")
+    assert extracted["items"][0]["features"]["dominant_color"] == "blue"
+    assert extracted["items"][0]["features"]["composition"] == "centered"
 
     save_response = main_module.save_pattern(
         main_module.PatternSaveRequest(
