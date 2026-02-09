@@ -2937,6 +2937,14 @@ export default function App() {
       >
         {sidebarOpen ? "\u2715" : "\u2630"}
       </button>
+      {sidebarOpen && (
+        <button
+          type="button"
+          className="app-sidebar-backdrop"
+          aria-label="Close sidebar"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
       <aside className={`app-sidebar ${sidebarOpen ? "app-sidebar--open" : ""} ${darkMode ? "app-sidebar--dark" : "app-sidebar--light"}`}>
         <div className="app-sidebar__section">
           <div className="app-sidebar__title">Account</div>

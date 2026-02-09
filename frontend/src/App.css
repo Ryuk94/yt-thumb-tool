@@ -528,6 +528,15 @@ button:not(:disabled):hover {
   color: #192030;
 }
 
+.app-sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 160;
+  border: 0;
+  background: rgba(10, 13, 20, 0.24);
+  cursor: pointer;
+}
+
 .app-sidebar {
   position: fixed;
   top: 0;
