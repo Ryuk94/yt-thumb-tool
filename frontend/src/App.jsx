@@ -1806,6 +1806,11 @@ export default function App() {
   };
 
   const compareRows = useMemo(() => compareResult?.rows || [], [compareResult]);
+  const allVisiblePatternsSelected = useMemo(() => {
+    if (!savedPatterns.length) return false;
+    const selected = new Set(selectedPatternIds);
+    return savedPatterns.every((pattern) => selected.has(pattern.pattern_id));
+  }, [savedPatterns, selectedPatternIds]);
 
   const exportCompareCsv = useCallback(() => {
     if (!isProUser) {
@@ -2269,6 +2274,36 @@ export default function App() {
                 </button>
                 <button type="button" onClick={() => setSelectedPatternIds([])} style={tabButtonStyle(false)}>
                   Clear Selection
+                </button>
+              </div>
+            )}
+            {!!savedPatterns.length && (
+              <div style={{ marginTop: 8, display: "flex", gap: 8, justifyContent: "center" }}>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSelectedPatternIds((prev) => {
+                      const merged = new Set(prev);
+                      savedPatterns.forEach((pattern) => merged.add(pattern.pattern_id));
+                      return Array.from(merged);
+                    })
+                  }
+                  style={tabButtonStyle(false)}
+                >
+                  Select Page
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSelectedPatternIds((prev) => {
+                      const visible = new Set(savedPatterns.map((pattern) => pattern.pattern_id));
+                      return prev.filter((id) => !visible.has(id));
+                    })
+                  }
+                  style={tabButtonStyle(false)}
+                  disabled={!allVisiblePatternsSelected}
+                >
+                  Unselect Page
                 </button>
               </div>
             )}
