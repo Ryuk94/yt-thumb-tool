@@ -499,6 +499,7 @@ export default function App() {
   const [items, setItems] = useState([]);
   const [trendingError, setTrendingError] = useState("");
   const [trendingLoading, setTrendingLoading] = useState(false);
+  const [trendingPaging, setTrendingPaging] = useState(false);
   const [region, setRegion] = useState(() => {
     try {
       const saved = localStorage.getItem("selectedRegion");
@@ -519,6 +520,7 @@ export default function App() {
   const [profileResolvedChannelId, setProfileResolvedChannelId] = useState("");
   const [profileError, setProfileError] = useState("");
   const [profileLoading, setProfileLoading] = useState(false);
+  const [profilePaging, setProfilePaging] = useState(false);
   const [profileHasSearched, setProfileHasSearched] = useState(false);
   const [profileSearches, setProfileSearches] = useState(() => {
     try {
@@ -584,6 +586,8 @@ export default function App() {
   const loadingTokenRef = useRef(0);
   const noticeTimeoutRef = useRef(null);
   const patternImportInputRef = useRef(null);
+  const trendingLoadSentinelRef = useRef(null);
+  const profileLoadSentinelRef = useRef(null);
   const [previewItem, setPreviewItem] = useState(null);
   const [proPrompt, setProPrompt] = useState({ open: false, title: "", message: "", cta: "" });
   const onboardingFlagsRef = useRef({ scrollPromptShown: false, hoverPromptShown: false });
@@ -861,11 +865,12 @@ export default function App() {
   }, [baseUrl, region, type, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
 
   const canLoadMoreTrending = isShorts ? !!nextTokenDiscover : !!nextTokenTop;
-  const canLoadMoreProfile = !!profileNextToken && !profileLoading;
+  const canLoadMoreProfile = !!profileNextToken && !profileLoading && !profilePaging;
 
   const loadMoreTrending = () => {
     const token = isShorts ? nextTokenDiscover : nextTokenTop;
-    if (!token) return;
+    if (!token || trendingPaging) return;
+    setTrendingPaging(true);
     const loadingToken = startGlobalLoading("Loading more thumbnails...", 18);
 
     fetch(`${baseUrl}?${buildParams(token)}`)
@@ -885,8 +890,13 @@ export default function App() {
         if (isQuotaErrorText(err.message)) {
           showGlobalNotice("Quota limit reached while loading more. Keeping current grid.", "warn");
         }
+        if (isShorts) setNextTokenDiscover(null);
+        else setNextTokenTop(null);
       })
-      .finally(() => endGlobalLoading(loadingToken));
+      .finally(() => {
+        setTrendingPaging(false);
+        endGlobalLoading(loadingToken);
+      });
   };
 
   const persistProfileSearch = (term) => {
@@ -910,6 +920,7 @@ export default function App() {
       return;
     }
     if (!reset && !profileResolvedChannelId) return;
+    if (!reset && profilePaging) return;
 
     const offset = reset ? 0 : Number(profileNextToken || 0);
     if (reset) {
@@ -917,10 +928,12 @@ export default function App() {
       setProfileNextToken(null);
       setProfileResolvedChannelId("");
       setProfileHasSearched(true);
+      setProfilePaging(false);
     }
 
     setProfileError("");
-    setProfileLoading(true);
+    if (reset) setProfileLoading(true);
+    else setProfilePaging(true);
     const loadingToken = startGlobalLoading("Resolving channel...", 12);
 
     const resolveAndFetch = async () => {
@@ -993,16 +1006,46 @@ export default function App() {
         } catch (fallbackErr) {
           const message = fallbackErr?.message || primaryErr?.message || "Failed to load profile feed.";
           setProfileError(message);
+          if (!reset) setProfileNextToken(null);
           if (isQuotaErrorText(message)) {
             showGlobalNotice("YouTube quota exhausted. Profile results may be partial.", "warn");
           }
         }
       })
       .finally(() => {
-        setProfileLoading(false);
+        if (reset) setProfileLoading(false);
+        else setProfilePaging(false);
         endGlobalLoading(loadingToken);
       });
   };
+
+  useEffect(() => {
+    if (tab !== "trending" || !canLoadMoreTrending || trendingLoading || trendingPaging) return;
+    const target = trendingLoadSentinelRef.current;
+    if (!target) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) loadMoreTrending();
+      },
+      { root: null, rootMargin: "420px 0px", threshold: 0.01 }
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [tab, canLoadMoreTrending, trendingLoading, trendingPaging, loadMoreTrending]);
+
+  useEffect(() => {
+    if (tab !== "profile" || !canLoadMoreProfile || profileLoading || profilePaging) return;
+    const target = profileLoadSentinelRef.current;
+    if (!target) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) fetchProfile(false);
+      },
+      { root: null, rootMargin: "420px 0px", threshold: 0.01 }
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [tab, canLoadMoreProfile, profileLoading, profilePaging, fetchProfile]);
 
   const handleDownloadPreview = async () => {
     if (!previewItem?.thumbnail) return;
@@ -1953,7 +1996,10 @@ export default function App() {
             ) : (
               <>
                 <ThumbnailGrid items={items} portraitMode={isShorts} />
-                <LoadMoreButton onClick={loadMoreTrending} disabled={!canLoadMoreTrending} style={actionButtonStyle(!canLoadMoreTrending)} />
+                <div ref={trendingLoadSentinelRef} style={{ height: 1 }} />
+                <div style={{ marginTop: 10, textAlign: "center", fontSize: 12, opacity: 0.75 }}>
+                  {canLoadMoreTrending ? (trendingPaging ? "Loading more..." : "Scroll for more") : "End of results"}
+                </div>
               </>
             )}
           </>
@@ -2043,11 +2089,10 @@ export default function App() {
             ) : (
               <>
                 <ThumbnailGrid items={profileItems} portraitMode={profileType === "shorts"} />
-                <LoadMoreButton
-                  onClick={() => fetchProfile(false)}
-                  disabled={!canLoadMoreProfile}
-                  style={actionButtonStyle(!canLoadMoreProfile)}
-                />
+                <div ref={profileLoadSentinelRef} style={{ height: 1 }} />
+                <div style={{ marginTop: 10, textAlign: "center", fontSize: 12, opacity: 0.75 }}>
+                  {canLoadMoreProfile ? (profilePaging ? "Loading more..." : "Scroll for more") : "End of results"}
+                </div>
               </>
             )}
           </>
