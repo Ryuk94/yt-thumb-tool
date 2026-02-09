@@ -25,6 +25,28 @@ function apiUrl(pathWithLeadingSlash) {
   return `${API_BASE}${pathWithLeadingSlash}`;
 }
 
+function isQuotaErrorText(value) {
+  const lowered = String(value || "").toLowerCase();
+  return lowered.includes("quota") || lowered.includes("youtube_quota_exhausted");
+}
+
+async function readApiErrorDetail(response, fallback) {
+  let detail = fallback;
+  try {
+    const payload = await response.json();
+    if (typeof payload?.detail === "string" && payload.detail.trim()) detail = payload.detail;
+    if (typeof payload?.error_code === "string" && payload.error_code.trim()) {
+      detail = `${detail} (${payload.error_code})`;
+    }
+  } catch {
+    // ignore payload parse errors
+  }
+  if (isQuotaErrorText(detail)) {
+    return "YouTube quota is exhausted right now. Keeping your last successful results visible.";
+  }
+  return detail;
+}
+
 function SubTabButton({ active, children, onClick, darkMode }) {
   return (
     <button
@@ -381,6 +403,7 @@ export default function App() {
   const [tab, setTab] = useState("trending");
 
   const [items, setItems] = useState([]);
+  const [trendingError, setTrendingError] = useState("");
   const [trendingLoading, setTrendingLoading] = useState(false);
   const [region, setRegion] = useState(() => {
     try {
@@ -533,13 +556,14 @@ export default function App() {
   useEffect(() => {
     const loadingToken = startGlobalLoading(`Loading ${type} feed...`, 12);
     setTrendingLoading(true);
-    setItems([]);
+    setTrendingError("");
     setNextTokenTop(null);
     setNextTokenDiscover(null);
 
     fetch(`${baseUrl}?${buildParams(null)}`)
-      .then((r) => {
+      .then(async (r) => {
         updateGlobalLoading(loadingToken, "Processing response...", 55);
+        if (!r.ok) throw new Error(await readApiErrorDetail(r, "Failed to load trending feed."));
         return r.json();
       })
       .then((d) => {
@@ -548,8 +572,8 @@ export default function App() {
         if (isShorts) setNextTokenDiscover(d.nextPageToken || null);
         else setNextTokenTop(d.nextPageToken || null);
       })
-      .catch(() => {
-        setItems([]);
+      .catch((err) => {
+        setTrendingError(err.message || "Failed to load trending feed.");
         setNextTokenTop(null);
         setNextTokenDiscover(null);
       })
@@ -567,8 +591,9 @@ export default function App() {
     const loadingToken = startGlobalLoading("Loading more thumbnails...", 18);
 
     fetch(`${baseUrl}?${buildParams(token)}`)
-      .then((r) => {
+      .then(async (r) => {
         updateGlobalLoading(loadingToken, "Merging new page...", 62);
+        if (!r.ok) throw new Error(await readApiErrorDetail(r, "Failed to load more thumbnails."));
         return r.json();
       })
       .then((d) => {
@@ -577,7 +602,9 @@ export default function App() {
         if (isShorts) setNextTokenDiscover(d.nextPageToken || null);
         else setNextTokenTop(d.nextPageToken || null);
       })
-      .catch(() => {})
+      .catch((err) => {
+        setTrendingError(err.message || "Failed to load more thumbnails.");
+      })
       .finally(() => endGlobalLoading(loadingToken));
   };
 
@@ -627,16 +654,7 @@ export default function App() {
     fetch(`${apiUrl("/profile")}?${params.toString()}`)
       .then(async (r) => {
         updateGlobalLoading(loadingToken, "Fetching profile thumbnails...", 54);
-        if (!r.ok) {
-          let detail = "Failed to load profile feed.";
-          try {
-            const payload = await r.json();
-            if (typeof payload?.detail === "string") detail = payload.detail;
-          } catch {
-            // ignore
-          }
-          throw new Error(detail);
-        }
+        if (!r.ok) throw new Error(await readApiErrorDetail(r, "Failed to load profile feed."));
         return r.json();
       })
       .then((d) => {
@@ -652,10 +670,6 @@ export default function App() {
       })
       .catch((err) => {
         setProfileError(err.message || "Failed to load profile feed.");
-        if (reset) {
-          setProfileItems([]);
-          setProfileNextToken(null);
-        }
       })
       .finally(() => {
         setProfileLoading(false);
@@ -731,16 +745,7 @@ export default function App() {
     fetch(`${apiUrl("/youtube/winners")}?${params.toString()}`)
       .then(async (r) => {
         updateGlobalLoading(loadingToken, "Scoring thumbnail quality...", 62);
-        if (!r.ok) {
-          let detail = "Failed to load winners.";
-          try {
-            const payload = await r.json();
-            if (typeof payload?.detail === "string") detail = payload.detail;
-          } catch {
-            // ignore
-          }
-          throw new Error(detail);
-        }
+        if (!r.ok) throw new Error(await readApiErrorDetail(r, "Failed to load winners."));
         return r.json();
       })
       .then((d) => {
@@ -750,8 +755,6 @@ export default function App() {
       })
       .catch((err) => {
         setWinnersError(err.message || "Failed to load winners.");
-        setWinnersItems([]);
-        setWinnersMeta(null);
       })
       .finally(() => {
         setWinnersLoading(false);
@@ -878,6 +881,8 @@ export default function App() {
                 <SubTabButton active={type === "videos"} onClick={() => handleTrendingTypeChange("videos")} darkMode={darkMode}>Videos</SubTabButton>
               </div>
             </div>
+
+            {trendingError && <div style={{ marginTop: 10, color: "#b00020", fontSize: 13, textAlign: "center" }}>{trendingError}</div>}
 
             {trendingLoading ? (
               <div style={{ minHeight: 240 }} />

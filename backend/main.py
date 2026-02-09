@@ -13,6 +13,7 @@ from pathlib import Path
 from statistics import StatisticsError, median
 from typing import Any
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 try:
@@ -1037,6 +1038,17 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(YouTubeQuotaExceededError)
+async def youtube_quota_exceeded_handler(_request: Request, _exc: YouTubeQuotaExceededError):
+    return JSONResponse(
+        status_code=429,
+        content={
+            "detail": "YouTube API quota is currently exhausted. Showing cached data where available.",
+            "error_code": "youtube_quota_exhausted",
+        },
+    )
+
+
 @app.on_event("startup")
 def on_startup_refresh_established_pool():
     maybe_schedule_established_pool_refresh()
@@ -2030,6 +2042,7 @@ def winners(
         "established_creators_considered": established_creator_count,
         "source_pages_loaded": source_pages_loaded,
         "relaxations": relaxations + source_relaxations,
+        "quota_limited": any("quota-limited" in str(note).lower() for note in source_relaxations),
     }
     if len(results) < limit:
         meta["message"] = f"Only {len(results)} winners after applying filters"
