@@ -20,6 +20,11 @@ const WINNERS_CATEGORIES = [
   { value: "entertainment", label: "Entertainment" },
   { value: "sports", label: "Sports" },
 ];
+const PATTERN_SOURCE_OPTIONS = [
+  { value: "winners", label: "Winners" },
+  { value: "trending", label: "Trending" },
+  { value: "profile", label: "Profile" },
+];
 
 function apiUrl(pathWithLeadingSlash) {
   return `${API_BASE}${pathWithLeadingSlash}`;
@@ -481,6 +486,24 @@ export default function App() {
   const [winnersLoading, setWinnersLoading] = useState(false);
   const [winnersError, setWinnersError] = useState("");
   const [winnersMeta, setWinnersMeta] = useState(null);
+  const [patternSource, setPatternSource] = useState("winners");
+  const [patternName, setPatternName] = useState("");
+  const [patternExtracting, setPatternExtracting] = useState(false);
+  const [patternSaving, setPatternSaving] = useState(false);
+  const [patternApplying, setPatternApplying] = useState(false);
+  const [patternError, setPatternError] = useState("");
+  const [patternItems, setPatternItems] = useState([]);
+  const [patternClusters, setPatternClusters] = useState([]);
+  const [applyPatternId, setApplyPatternId] = useState("");
+  const [activePattern, setActivePattern] = useState(null);
+  const [savedPatterns, setSavedPatterns] = useState(() => {
+    try {
+      const raw = localStorage.getItem("savedPatterns");
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
 
   const [darkMode, setDarkMode] = useState(() => readCookie("darkMode") === "1");
   const [globalLoading, setGlobalLoading] = useState({ active: false, message: "", progress: 0 });
@@ -570,6 +593,14 @@ export default function App() {
       // ignore
     }
   }, [region]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("savedPatterns", JSON.stringify(savedPatterns));
+    } catch {
+      // ignore
+    }
+  }, [savedPatterns]);
 
   useEffect(() => {
     const onOpenPreview = (event) => {
@@ -876,6 +907,153 @@ export default function App() {
     if (tab === "winners") requestWinners();
   }, [tab, winnersFormat, winnersCategory, region, winnersLimit, winnersWindowDays, winnersQuality, winnersMinQuality, requestWinners]);
 
+  const patternSourceItems = useMemo(() => {
+    if (patternSource === "trending") return items;
+    if (patternSource === "profile") return profileItems;
+    return winnersItems;
+  }, [patternSource, items, profileItems, winnersItems]);
+
+  const extractPatternsFromCurrentSource = useCallback(() => {
+    const candidates = (patternSourceItems || [])
+      .map((item) => ({
+        thumbnail_url: item.thumbnail || item.thumbnail_url || "",
+        video_id: item.video_id || item.id || null,
+        title: item.title || null,
+        channel_title: item.channelTitle || item.channel_title || null,
+      }))
+      .filter((item) => !!item.thumbnail_url)
+      .slice(0, 60);
+
+    if (!candidates.length) {
+      setPatternError("No thumbnails available in this source yet.");
+      return;
+    }
+
+    setPatternExtracting(true);
+    setPatternError("");
+    const loadingToken = startGlobalLoading("Extracting visual patterns...", 18);
+
+    fetch(apiUrl("/patterns/extract"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items: candidates }),
+    })
+      .then(async (r) => {
+        updateGlobalLoading(loadingToken, "Clustering thumbnail features...", 66);
+        if (!r.ok) throw new Error(await readApiErrorDetail(r, "Failed to extract patterns."));
+        return r.json();
+      })
+      .then((payload) => {
+        setPatternItems(payload.items || []);
+        setPatternClusters(payload.clusters || []);
+      })
+      .catch((err) => {
+        setPatternError(err.message || "Failed to extract patterns.");
+      })
+      .finally(() => {
+        setPatternExtracting(false);
+        endGlobalLoading(loadingToken);
+      });
+  }, [patternSourceItems, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
+
+  const saveCurrentPattern = useCallback(() => {
+    if (!patternClusters.length) {
+      setPatternError("Extract patterns first before saving.");
+      return;
+    }
+    const trimmedName = patternName.trim();
+    if (!trimmedName) {
+      setPatternError("Enter a pattern name.");
+      return;
+    }
+
+    setPatternSaving(true);
+    setPatternError("");
+    const loadingToken = startGlobalLoading("Saving pattern library entry...", 24);
+
+    fetch(apiUrl("/patterns/save"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: trimmedName,
+        clusters: patternClusters,
+        filters: {
+          source: patternSource,
+          region,
+          winners_format: winnersFormat,
+          winners_category: winnersCategory,
+          profile_type: profileType,
+          trending_type: type,
+        },
+      }),
+    })
+      .then(async (r) => {
+        updateGlobalLoading(loadingToken, "Committing library entry...", 78);
+        if (!r.ok) throw new Error(await readApiErrorDetail(r, "Failed to save pattern."));
+        return r.json();
+      })
+      .then((payload) => {
+        const entry = payload.pattern || {};
+        setSavedPatterns((prev) => [
+          {
+            pattern_id: payload.pattern_id,
+            name: entry.name || trimmedName,
+            created_at: entry.created_at || new Date().toISOString(),
+          },
+          ...prev.filter((item) => item.pattern_id !== payload.pattern_id),
+        ]);
+        setApplyPatternId(payload.pattern_id || "");
+      })
+      .catch((err) => {
+        setPatternError(err.message || "Failed to save pattern.");
+      })
+      .finally(() => {
+        setPatternSaving(false);
+        endGlobalLoading(loadingToken);
+      });
+  }, [
+    patternClusters,
+    patternName,
+    patternSource,
+    region,
+    winnersFormat,
+    winnersCategory,
+    profileType,
+    type,
+    startGlobalLoading,
+    updateGlobalLoading,
+    endGlobalLoading,
+  ]);
+
+  const applySavedPattern = useCallback((patternId) => {
+    const targetId = String(patternId || applyPatternId || "").trim();
+    if (!targetId) {
+      setPatternError("Enter a valid pattern ID.");
+      return;
+    }
+
+    setPatternApplying(true);
+    setPatternError("");
+    const loadingToken = startGlobalLoading("Applying saved pattern...", 20);
+    fetch(apiUrl(`/patterns/apply/${encodeURIComponent(targetId)}`))
+      .then(async (r) => {
+        updateGlobalLoading(loadingToken, "Loading pattern definition...", 74);
+        if (!r.ok) throw new Error(await readApiErrorDetail(r, "Failed to load pattern."));
+        return r.json();
+      })
+      .then((payload) => {
+        setActivePattern(payload.pattern || null);
+        setApplyPatternId(targetId);
+      })
+      .catch((err) => {
+        setPatternError(err.message || "Failed to load pattern.");
+      })
+      .finally(() => {
+        setPatternApplying(false);
+        endGlobalLoading(loadingToken);
+      });
+  }, [applyPatternId, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
+
   const onProfileKeyDown = (e) => {
     if (e.key === "Enter") fetchProfile(true);
   };
@@ -964,6 +1142,7 @@ export default function App() {
           <button onClick={() => setTab("trending")} style={tabButtonStyle(tab === "trending")}>Trending</button>
           <button onClick={() => setTab("profile")} style={tabButtonStyle(tab === "profile")}>Profile</button>
           <button onClick={() => setTab("winners")} style={tabButtonStyle(tab === "winners")}>Winners</button>
+          <button onClick={() => setTab("patterns")} style={tabButtonStyle(tab === "patterns")}>Patterns</button>
         </div>
 
         {tab === "trending" && (
@@ -1187,6 +1366,111 @@ export default function App() {
               <div style={{ minHeight: 240 }} />
             ) : (
               <ThumbnailGrid items={winnersItems} portraitMode={winnersFormat === "shorts"} />
+            )}
+          </>
+        )}
+
+        {tab === "patterns" && (
+          <>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "center" }}>
+              <RoundedDropdown
+                value={patternSource}
+                onChange={setPatternSource}
+                darkMode={darkMode}
+                minWidth={124}
+                options={PATTERN_SOURCE_OPTIONS}
+              />
+              <button
+                onClick={extractPatternsFromCurrentSource}
+                disabled={patternExtracting}
+                style={actionButtonStyle(patternExtracting)}
+              >
+                {patternExtracting ? "Extracting..." : "Extract Patterns"}
+              </button>
+            </div>
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "center", marginTop: 10 }}>
+              <input
+                value={patternName}
+                onChange={(e) => setPatternName(e.target.value)}
+                placeholder="Pattern name"
+                style={{ ...roundedFieldStyle, minWidth: 260 }}
+              />
+              <button
+                onClick={saveCurrentPattern}
+                disabled={patternSaving || !patternClusters.length}
+                style={actionButtonStyle(patternSaving || !patternClusters.length)}
+              >
+                {patternSaving ? "Saving..." : "Save Pattern"}
+              </button>
+            </div>
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "center", marginTop: 10 }}>
+              <input
+                value={applyPatternId}
+                onChange={(e) => setApplyPatternId(e.target.value)}
+                placeholder="Pattern ID"
+                style={{ ...roundedFieldStyle, minWidth: 260 }}
+              />
+              <button onClick={() => applySavedPattern()} disabled={patternApplying} style={actionButtonStyle(patternApplying)}>
+                {patternApplying ? "Loading..." : "Apply Pattern"}
+              </button>
+            </div>
+
+            {patternError && <div style={{ marginTop: 10, color: "#b00020", fontSize: 13, textAlign: "center" }}>{patternError}</div>}
+
+            {!!savedPatterns.length && (
+              <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+                {savedPatterns.slice(0, 10).map((pattern) => (
+                  <button
+                    key={pattern.pattern_id}
+                    type="button"
+                    onClick={() => applySavedPattern(pattern.pattern_id)}
+                    style={tabButtonStyle(false)}
+                  >
+                    {pattern.name}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {!!patternClusters.length && (
+              <div style={{ ...infoBoxStyle, marginTop: 12, borderRadius: 10, padding: "10px 12px" }}>
+                <div style={{ fontSize: 12, display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
+                  <span>Source items: {patternSourceItems.length}</span>
+                  <span>Clustered items: {patternItems.length}</span>
+                  <span>Clusters: {patternClusters.length}</span>
+                </div>
+                <div style={{ marginTop: 8, fontSize: 12, display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+                  {patternClusters.map((cluster) => (
+                    <span key={cluster.cluster_id}>
+                      {cluster.cluster_id} ({cluster.count})
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {activePattern && (
+              <div style={{ ...infoBoxStyle, marginTop: 12, borderRadius: 10, padding: "10px 12px" }}>
+                <div style={{ fontWeight: 700, fontSize: 13, textAlign: "center" }}>
+                  Active pattern: {activePattern.name || applyPatternId}
+                </div>
+                <div style={{ marginTop: 6, fontSize: 12, textAlign: "center" }}>
+                  Saved clusters: {(activePattern.clusters || []).length}
+                </div>
+              </div>
+            )}
+
+            {!!patternItems.length && (
+              <ThumbnailGrid items={patternItems.map((item) => ({
+                id: item.video_id || item.thumbnail_url,
+                title: item.title || item.cluster_id || "Pattern Item",
+                channelTitle: item.channel_title || item.features?.quality_band || "Pattern",
+                thumbnail: item.thumbnail_url,
+                views: 0,
+                source_group: item.cluster_id,
+              }))} />
             )}
           </>
         )}
