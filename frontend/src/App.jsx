@@ -271,6 +271,7 @@ function ThumbnailGrid({
   showMetrics = false,
   gridContext = "generic",
   enableGroupHoverHighlight = true,
+  infoMode = "channel",
 }) {
   const [hoveredGroup, setHoveredGroup] = useState(null);
   const [clusterTooltip, setClusterTooltip] = useState(null);
@@ -299,6 +300,8 @@ function ThumbnailGrid({
         const groupId = v.cluster_id || v.source_group || null;
         const clusterName = enableGroupHoverHighlight ? String(v.cluster_name || groupId || "").trim() : "";
         const clusterColor = v.cluster_color || clusterColorFromId(groupId || clusterName || "default");
+        const qualityValue = v.quality_score ?? v.thumb_insights?.quality_score;
+        const publishedLabel = formatRelativeDay(v.publishedAt || v.published_at);
         const isGrouped = enableGroupHoverHighlight && !!groupId && !!hoveredGroup;
         const isGroupMatch = isGrouped && groupId === hoveredGroup;
         const isGroupDimmed = isGrouped && !isGroupMatch;
@@ -394,7 +397,15 @@ function ThumbnailGrid({
             <div style={{ padding: 10 }}>
               <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.2, color: "#111" }}>{v.title}</div>
               <div style={{ opacity: 0.8, fontSize: 12, marginTop: 6, color: "#555" }}>
-                {showMetrics ? `${channel} - ${views.toLocaleString()} views` : channel}
+                {infoMode === "views"
+                  ? `${channel} - ${views.toLocaleString()} views`
+                  : infoMode === "relative_day"
+                  ? `${channel} - ${publishedLabel}`
+                  : infoMode === "quality"
+                  ? `${channel} - Quality ${formatMetricValue(qualityValue)}`
+                  : showMetrics
+                  ? `${channel} - ${views.toLocaleString()} views`
+                  : channel}
               </div>
               {showMetrics && outlier != null && (
                 <div style={{ marginTop: 6, fontSize: 11, display: "flex", gap: 6 }}>
@@ -525,6 +536,19 @@ function formatDuration(duration) {
   const s = total % 60;
   if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function formatRelativeDay(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "-";
+  const ts = Date.parse(raw);
+  if (Number.isNaN(ts)) return "-";
+  const now = Date.now();
+  const dayMs = 24 * 60 * 60 * 1000;
+  const diff = Math.max(0, Math.floor((now - ts) / dayMs));
+  if (diff <= 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  return `${diff} days ago`;
 }
 
 function escapeCsvValue(value) {
@@ -725,9 +749,9 @@ export default function App() {
 
   const [winnersFormat, setWinnersFormat] = useState("videos");
   const [winnersCategory, setWinnersCategory] = useState("all");
-  const [winnersLimit, setWinnersLimit] = useState(24);
+  const [winnersLimit, setWinnersLimit] = useState(48);
   const [winnersWindowDays, setWinnersWindowDays] = useState(180);
-  const [winnersQuality, setWinnersQuality] = useState(false);
+  const [winnersQuality, setWinnersQuality] = useState(true);
   const [winnersMinQuality, setWinnersMinQuality] = useState(60);
   const [winnersItems, setWinnersItems] = useState([]);
   const [winnersLoading, setWinnersLoading] = useState(false);
@@ -1420,7 +1444,7 @@ export default function App() {
       limit: String(winnersLimit),
       window_days: String(winnersWindowDays),
       sort: "outlier",
-      quality: winnersQuality ? "1" : "0",
+      quality: "1",
       min_quality: String(winnersMinQuality),
     });
 
@@ -2408,7 +2432,7 @@ export default function App() {
               <div style={{ minHeight: 240 }} />
             ) : (
               <>
-                <ThumbnailGrid items={filteredTrendingItems} portraitMode={isShorts} gridContext="trending" />
+                <ThumbnailGrid items={filteredTrendingItems} portraitMode={isShorts} gridContext="trending" infoMode="views" />
                 <div ref={trendingLoadSentinelRef} style={{ height: 1 }} />
                 <div style={{ marginTop: 10, textAlign: "center", fontSize: 12, opacity: 0.75 }}>
                   {canLoadMoreTrending ? (trendingPaging ? "Loading more..." : "Scroll for more") : "End of results"}
@@ -2501,7 +2525,12 @@ export default function App() {
               <div style={{ minHeight: 240 }} />
             ) : (
               <>
-                <ThumbnailGrid items={filteredProfileItems} portraitMode={profileType === "shorts"} gridContext="profile" />
+                <ThumbnailGrid
+                  items={filteredProfileItems}
+                  portraitMode={profileType === "shorts"}
+                  gridContext="profile"
+                  infoMode={profileSort === "popular" ? "views" : "relative_day"}
+                />
                 <div ref={profileLoadSentinelRef} style={{ height: 1 }} />
                 <div style={{ marginTop: 10, textAlign: "center", fontSize: 12, opacity: 0.75 }}>
                   {canLoadMoreProfile ? (profilePaging ? "Loading more..." : "Scroll for more") : "End of results"}
@@ -2545,9 +2574,9 @@ export default function App() {
                 darkMode={darkMode}
                 minWidth={96}
                 options={[
-                  { value: 12, label: "12" },
                   { value: 24, label: "24" },
                   { value: 48, label: "48" },
+                  { value: 72, label: "72" },
                 ]}
               />
               <RoundedDropdown
@@ -2561,25 +2590,19 @@ export default function App() {
                   { value: 180, label: "180 days" },
                 ]}
               />
-              <div style={{ display: "flex", gap: 8 }}>
-                <SubTabButton active={!winnersQuality} onClick={() => setWinnersQuality(false)} darkMode={darkMode}>Quality Off</SubTabButton>
-                <SubTabButton active={winnersQuality} onClick={() => setWinnersQuality(true)} darkMode={darkMode}>Quality On</SubTabButton>
-              </div>
-              {winnersQuality && (
-                <RoundedDropdown
-                  value={winnersMinQuality}
-                  onChange={setWinnersMinQuality}
-                  darkMode={darkMode}
-                  minWidth={108}
-                  options={[
-                    { value: 40, label: "Q >= 40" },
-                    { value: 50, label: "Q >= 50" },
-                    { value: 60, label: "Q >= 60" },
-                    { value: 70, label: "Q >= 70" },
-                    { value: 80, label: "Q >= 80" },
-                  ]}
-                />
-              )}
+              <RoundedDropdown
+                value={winnersMinQuality}
+                onChange={setWinnersMinQuality}
+                darkMode={darkMode}
+                minWidth={108}
+                options={[
+                  { value: 40, label: "Q >= 40" },
+                  { value: 50, label: "Q >= 50" },
+                  { value: 60, label: "Q >= 60" },
+                  { value: 70, label: "Q >= 70" },
+                  { value: 80, label: "Q >= 80" },
+                ]}
+              />
             </div>
 
             {winnersError && <div style={{ marginTop: 10, color: "#b00020", fontSize: 13 }}>{winnersError}</div>}
@@ -2619,6 +2642,7 @@ export default function App() {
                 portraitMode={winnersFormat === "shorts"}
                 gridContext="winners"
                 enableGroupHoverHighlight={false}
+                infoMode="quality"
               />
             )}
           </>
@@ -2631,7 +2655,9 @@ export default function App() {
                 Patterns are available for all users. Pro adds higher limits and advanced automation.
               </div>
             )}
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "center", marginTop: 10 }}>
+            <details style={{ marginTop: 10 }}>
+              <summary style={{ cursor: "pointer", fontSize: 12, opacity: 0.85 }}>Library tools</summary>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "center", marginTop: 10 }}>
               <input
                 value={patternLibraryQuery}
                 onChange={(e) => setPatternLibraryQuery(e.target.value)}
@@ -2683,7 +2709,8 @@ export default function App() {
                 onChange={importPatternLibrary}
                 style={{ display: "none" }}
               />
-            </div>
+              </div>
+            </details>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "center" }}>
               <RoundedDropdown
                 value={patternSource}
@@ -2739,34 +2766,6 @@ export default function App() {
               </button>
             </div>
 
-            {!!savedPatterns.length && (
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "center", marginTop: 10 }}>
-                <RoundedDropdown
-                  value={comparePatternAId || savedPatterns[0].pattern_id}
-                  onChange={setComparePatternAId}
-                  darkMode={darkMode}
-                  minWidth={220}
-                  options={savedPatterns.slice(0, 20).map((pattern) => ({
-                    value: pattern.pattern_id,
-                    label: `A: ${pattern.name}`,
-                  }))}
-                />
-                <RoundedDropdown
-                  value={comparePatternBId || savedPatterns[Math.min(1, savedPatterns.length - 1)].pattern_id}
-                  onChange={setComparePatternBId}
-                  darkMode={darkMode}
-                  minWidth={220}
-                  options={savedPatterns.slice(0, 20).map((pattern) => ({
-                    value: pattern.pattern_id,
-                    label: `B: ${pattern.name}`,
-                  }))}
-                />
-                <button onClick={compareSavedPatterns} disabled={patternComparing} style={actionButtonStyle(patternComparing)}>
-                  {patternComparing ? "Comparing..." : "Compare"}
-                </button>
-              </div>
-            )}
-
             {patternError && <div style={{ marginTop: 10, color: "#b00020", fontSize: 13, textAlign: "center" }}>{patternError}</div>}
 
             {patternLibraryMeta?.total != null && (
@@ -2780,163 +2779,6 @@ export default function App() {
                 <span>Pinned: {patternStats.pinned}</span>
                 <span>With Notes: {patternStats.with_notes}</span>
                 <span>Avg Clusters: {patternStats.avg_clusters}</span>
-              </div>
-            )}
-            {!!selectedPatternIds.length && (
-              <div style={{ marginTop: 8, display: "flex", gap: 8, justifyContent: "center" }}>
-                <button type="button" onClick={bulkDeleteSelectedPatterns} style={tabButtonStyle(false)}>
-                  Delete Selected ({selectedPatternIds.length})
-                </button>
-                <button type="button" onClick={() => setSelectedPatternIds([])} style={tabButtonStyle(false)}>
-                  Clear Selection
-                </button>
-              </div>
-            )}
-            {!!savedPatterns.length && (
-              <div style={{ marginTop: 8, display: "flex", gap: 8, justifyContent: "center" }}>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setSelectedPatternIds((prev) => {
-                      const merged = new Set(prev);
-                      savedPatterns.forEach((pattern) => merged.add(pattern.pattern_id));
-                      return Array.from(merged);
-                    })
-                  }
-                  style={tabButtonStyle(false)}
-                >
-                  Select Page
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setSelectedPatternIds((prev) => {
-                      const visible = new Set(savedPatterns.map((pattern) => pattern.pattern_id));
-                      return prev.filter((id) => !visible.has(id));
-                    })
-                  }
-                  style={tabButtonStyle(false)}
-                  disabled={!allVisiblePatternsSelected}
-                >
-                  Unselect Page
-                </button>
-              </div>
-            )}
-            {patternLibraryMeta?.total != null && (
-              <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "center", justifyContent: "center" }}>
-                <button
-                  type="button"
-                  onClick={() => setPatternLibraryOffset((prev) => Math.max(0, prev - Number(patternLibraryLimit || 25)))}
-                  disabled={patternLibraryOffset <= 0}
-                  style={tabButtonStyle(false)}
-                >
-                  Prev
-                </button>
-                <div style={{ fontSize: 12, opacity: 0.86 }}>
-                  {Math.min(patternLibraryMeta.total, patternLibraryOffset + 1)}-
-                  {Math.min(patternLibraryMeta.total, patternLibraryOffset + Number(patternLibraryLimit || 25))}
-                  {" / "}
-                  {patternLibraryMeta.total}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setPatternLibraryOffset((prev) => prev + Number(patternLibraryLimit || 25))}
-                  disabled={patternLibraryOffset + Number(patternLibraryLimit || 25) >= Number(patternLibraryMeta.total || 0)}
-                  style={tabButtonStyle(false)}
-                >
-                  Next
-                </button>
-              </div>
-            )}
-
-            {!!savedPatterns.length && (
-              <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
-                {savedPatterns.slice(0, 10).map((pattern) => (
-                  <div key={pattern.pattern_id} style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
-                    <button
-                      type="button"
-                      onClick={() => applySavedPattern(pattern.pattern_id)}
-                      style={tabButtonStyle(false)}
-                    >
-                      {pattern.pinned ? "★ " : ""}
-                      {pattern.name}
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`${selectedPatternIds.includes(pattern.pattern_id) ? "Unselect" : "Select"} ${pattern.name}`}
-                      onClick={() => togglePatternSelection(pattern.pattern_id)}
-                      style={{
-                        ...tabButtonStyle(selectedPatternIds.includes(pattern.pattern_id)),
-                        minWidth: 40,
-                        padding: "8px 10px",
-                      }}
-                    >
-                      Sel
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`${pattern.pinned ? "Unpin" : "Pin"} ${pattern.name}`}
-                      onClick={() => togglePinnedPattern(pattern)}
-                      style={{
-                        ...tabButtonStyle(false),
-                        minWidth: 36,
-                        padding: "8px 10px",
-                      }}
-                    >
-                      {pattern.pinned ? "★" : "☆"}
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`Rename ${pattern.name}`}
-                      onClick={() => renameSavedPattern(pattern)}
-                      style={{
-                        ...tabButtonStyle(false),
-                        minWidth: 36,
-                        padding: "8px 10px",
-                      }}
-                    >
-                      {"\u270E"}
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`Duplicate ${pattern.name}`}
-                      onClick={() => cloneSavedPattern(pattern.pattern_id)}
-                      style={{
-                        ...tabButtonStyle(false),
-                        minWidth: 36,
-                        padding: "8px 10px",
-                      }}
-                    >
-                      Dup
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`Edit notes for ${pattern.name}`}
-                      onClick={() => editPatternNotes(pattern)}
-                      style={{
-                        ...tabButtonStyle(false),
-                        minWidth: 36,
-                        padding: "8px 10px",
-                      }}
-                    >
-                      N
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`Delete ${pattern.name}`}
-                      onClick={() => deleteSavedPattern(pattern.pattern_id)}
-                      style={{
-                        ...tabButtonStyle(false),
-                        minWidth: 36,
-                        padding: "8px 10px",
-                        borderColor: "#b00020",
-                        color: "#b00020",
-                      }}
-                    >
-                      {"\u2715"}
-                    </button>
-                  </div>
-                ))}
               </div>
             )}
 
@@ -3039,53 +2881,6 @@ export default function App() {
               </div>
             )}
 
-            {comparePatternA && comparePatternB && (
-              <div style={{ ...infoBoxStyle, marginTop: 12, borderRadius: 10, padding: "10px 12px" }}>
-                <div style={{ fontWeight: 700, fontSize: 13, textAlign: "center" }}>
-                  Compare: {comparePatternA.name || "Pattern A"} vs {comparePatternB.name || "Pattern B"}
-                </div>
-                {compareResult?.summary && (
-                  <div style={{ marginTop: 6, fontSize: 12, textAlign: "center" }}>
-                    Overlap: {compareResult.summary.overlap_signatures}/{compareResult.summary.union_signatures} signatures (
-                    {(Number(compareResult.summary.overlap_ratio || 0) * 100).toFixed(0)}%)
-                  </div>
-                )}
-                <div style={{ marginTop: 8, display: "flex", justifyContent: "center" }}>
-                  <button
-                    type="button"
-                    onClick={exportCompareCsv}
-                    style={tabButtonStyle(false)}
-                  >
-                    Export CSV
-                  </button>
-                </div>
-                <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
-                  {compareRows.length ? compareRows.map((row) => (
-                    <div
-                      key={row.signature}
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "minmax(0,1fr) auto auto auto",
-                        gap: 10,
-                        alignItems: "center",
-                        fontSize: 12,
-                      }}
-                    >
-                      <span style={{ textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {row.signature}
-                      </span>
-                      <span>A: {row.left_count}</span>
-                      <span>B: {row.right_count}</span>
-                      <span style={{ color: row.delta > 0 ? "#0b8f3a" : row.delta < 0 ? "#b00020" : undefined }}>
-                        Δ {row.delta}
-                      </span>
-                    </div>
-                  )) : (
-                    <div style={{ textAlign: "center", fontSize: 12 }}>No overlapping cluster signatures.</div>
-                  )}
-                </div>
-              </div>
-            )}
 
             {!!patternItems.length && (
               <ThumbnailGrid gridContext="patterns" portraitMode={patternGridPortraitMode} items={filteredPatternItems.map((item) => ({
@@ -3161,9 +2956,6 @@ export default function App() {
               {isProUser ? "Manage Pro" : "Join Pro"}
             </button>
           </div>
-          <button type="button" className="app-sidebar__btn" onClick={() => setDarkMode((prev) => !prev)}>
-            Theme: {darkMode ? "Dark" : "Light"}
-          </button>
         </div>
 
         <div className="app-sidebar__section">
@@ -3216,22 +3008,37 @@ export default function App() {
           <div className="app-sidebar__title">Saved Patterns</div>
           <div className="app-sidebar__list">
             {savedPatterns.slice(0, 8).map((pattern) => (
-              <button
-                key={pattern.pattern_id}
-                type="button"
-                className="app-sidebar__chip"
-                onClick={() => {
-                  setTab("patterns");
-                  setApplyPatternId(pattern.pattern_id);
-                }}
-              >
-                {pattern.name}
-              </button>
+              <div key={pattern.pattern_id} className="app-sidebar__pattern-row">
+                <button
+                  type="button"
+                  className="app-sidebar__chip app-sidebar__chip--grow"
+                  onClick={() => {
+                    setTab("patterns");
+                    setApplyPatternId(pattern.pattern_id);
+                    applySavedPattern(pattern.pattern_id);
+                  }}
+                  title={pattern.name}
+                >
+                  {pattern.pinned ? "★ " : ""}{pattern.name}
+                </button>
+                <button type="button" className="app-sidebar__icon-btn" title="Favorite" onClick={() => togglePinnedPattern(pattern)}>⭐</button>
+                <button type="button" className="app-sidebar__icon-btn" title="Edit Name" onClick={() => renameSavedPattern(pattern)}>✏️</button>
+                <button type="button" className="app-sidebar__icon-btn" title="Duplicate" onClick={() => cloneSavedPattern(pattern.pattern_id)}>📄</button>
+                <button type="button" className="app-sidebar__icon-btn" title="Notes" onClick={() => editPatternNotes(pattern)}>📝</button>
+              </div>
             ))}
             {!savedPatterns.length && <div className="app-sidebar__empty">No saved patterns yet.</div>}
           </div>
         </div>
       </aside>
+      <button
+        type="button"
+        className={`app-theme-toggle ${darkMode ? "app-theme-toggle--dark" : "app-theme-toggle--light"}`}
+        onClick={() => setDarkMode((prev) => !prev)}
+        aria-label="Toggle theme"
+      >
+        {darkMode ? "\u2600\uFE0F" : "\uD83C\uDF19"}
+      </button>
       <ProPrompt
         open={proPrompt.open}
         darkMode={darkMode}

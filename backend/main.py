@@ -2292,89 +2292,106 @@ def discover(
 
     lang = lang_for_region(region)
 
+    try:
+        offset = max(0, int(page_token or "0"))
+    except ValueError:
+        offset = 0
+
     cache_key = (
         f"discover:{FILTER_CACHE_VERSION}:{region}:{max_results}:{video_category_id}:{require_60s}:"
-        f"{require_hash}:{verticalish}:{days}:{page_token}:{enforce_lang}:{strict_shorts}:{aspect_filter}"
+        f"{require_hash}:{verticalish}:{days}:{enforce_lang}:{strict_shorts}:{aspect_filter}:offset:{offset}"
     )
     cached = cache_get(cache_key)
     if cached is not None:
         return cached
 
-    short_videos, pages_used = fetch_short_chart_videos(region, video_category_id, max_pages=2)
-    next_token = None if pages_used < 2 else "pages=" + str(pages_used)
+    source_cache_key = (
+        f"discover-source:{FILTER_CACHE_VERSION}:{region}:{video_category_id}:{require_60s}:"
+        f"{require_hash}:{verticalish}:{days}:{enforce_lang}:{strict_shorts}:{aspect_filter}"
+    )
+    source_cached = cache_get(source_cache_key)
+    if source_cached is not None:
+        source_items = list(source_cached.get("items", []))
+    else:
+        short_videos, _pages_used = fetch_short_chart_videos(region, video_category_id, max_pages=2)
 
-    matched = []
-    other = []
+        matched = []
+        other = []
 
-    for v in short_videos:
-        snip = v.get("snippet", {})
-        stats = v.get("statistics", {})
-        details = v.get("contentDetails", {})
-        thumbs = snip.get("thumbnails", {})
+        for v in short_videos:
+            snip = v.get("snippet", {})
+            stats = v.get("statistics", {})
+            details = v.get("contentDetails", {})
+            thumbs = snip.get("thumbnails", {})
 
-        title = (snip.get("title") or "").strip()
-        duration_seconds = iso8601_duration_to_seconds(details.get("duration", ""))
-        thumb_obj = best_thumbnail_object(thumbs) or {}
-        thumb_ratio = thumbnail_aspect_ratio_from_dims(thumb_obj.get("width"), thumb_obj.get("height"))
-        thumb_url = thumb_obj.get("url") or ""
+            title = (snip.get("title") or "").strip()
+            duration_seconds = iso8601_duration_to_seconds(details.get("duration", ""))
+            thumb_obj = best_thumbnail_object(thumbs) or {}
+            thumb_ratio = thumbnail_aspect_ratio_from_dims(thumb_obj.get("width"), thumb_obj.get("height"))
+            thumb_url = thumb_obj.get("url") or ""
 
-        if aspect_filter:
-            scanned_ratio = None
-            if thumb_url:
-                insights = analyze_thumbnail(thumb_url)
-                scanned_value = insights.get("aspect_ratio")
-                if isinstance(scanned_value, (int, float)) and scanned_value > 0:
-                    scanned_ratio = float(scanned_value)
+            if aspect_filter:
+                scanned_ratio = None
+                if thumb_url:
+                    insights = analyze_thumbnail(thumb_url)
+                    scanned_value = insights.get("aspect_ratio")
+                    if isinstance(scanned_value, (int, float)) and scanned_value > 0:
+                        scanned_ratio = float(scanned_value)
 
-            ratio_for_filter = scanned_ratio if scanned_ratio is not None else thumb_ratio
-            pass_aspect = ratio_for_filter is not None and ratio_for_filter <= SHORTS_ASPECT_RATIO_MAX
-            pass_confirmed = strict_shorts and is_confirmed_short(v.get("id") or "")
-            pass_duration_fallback = (
-                strict_shorts and require_60s and ratio_for_filter is not None and ratio_for_filter <= 1.0
-            )
-            if not (pass_aspect or pass_confirmed or pass_duration_fallback):
-                continue
-        else:
-            if require_60s and duration_seconds > 60:
-                continue
-            confirmed_short = strict_shorts and is_confirmed_short(v.get("id") or "")
-            if strict_shorts and not (
-                confirmed_short or (require_60s and thumb_ratio is not None and thumb_ratio <= 1.0)
-            ):
-                continue
-            if require_hash and "#shorts" not in title.lower():
-                continue
-            if verticalish and not is_verticalish(thumbs):
-                continue
+                ratio_for_filter = scanned_ratio if scanned_ratio is not None else thumb_ratio
+                pass_aspect = ratio_for_filter is not None and ratio_for_filter <= SHORTS_ASPECT_RATIO_MAX
+                pass_confirmed = strict_shorts and is_confirmed_short(v.get("id") or "")
+                pass_duration_fallback = (
+                    strict_shorts and require_60s and ratio_for_filter is not None and ratio_for_filter <= 1.0
+                )
+                if not (pass_aspect or pass_confirmed or pass_duration_fallback):
+                    continue
+            else:
+                if require_60s and duration_seconds > 60:
+                    continue
+                confirmed_short = strict_shorts and is_confirmed_short(v.get("id") or "")
+                if strict_shorts and not (
+                    confirmed_short or (require_60s and thumb_ratio is not None and thumb_ratio <= 1.0)
+                ):
+                    continue
+                if require_hash and "#shorts" not in title.lower():
+                    continue
+                if verticalish and not is_verticalish(thumbs):
+                    continue
 
-        item = {
-            "id": v.get("id"),
-            "title": title,
-            "channelTitle": snip.get("channelTitle"),
-            "publishedAt": snip.get("publishedAt"),
-            "views": int(stats.get("viewCount", 0) or 0),
-            "duration": duration_seconds,
-            "thumbnail": thumb_url,
-            "thumbWidth": thumb_obj.get("width"),
-            "thumbHeight": thumb_obj.get("height"),
-            "defaultAudioLanguage": snip.get("defaultAudioLanguage"),
-            "defaultLanguage": snip.get("defaultLanguage"),
-        }
+            item = {
+                "id": v.get("id"),
+                "title": title,
+                "channelTitle": snip.get("channelTitle"),
+                "publishedAt": snip.get("publishedAt"),
+                "views": int(stats.get("viewCount", 0) or 0),
+                "duration": duration_seconds,
+                "thumbnail": thumb_url,
+                "thumbWidth": thumb_obj.get("width"),
+                "thumbHeight": thumb_obj.get("height"),
+                "defaultAudioLanguage": snip.get("defaultAudioLanguage"),
+                "defaultLanguage": snip.get("defaultLanguage"),
+            }
 
-        if enforce_lang and matches_lang(snip, lang):
-            matched.append(item)
-        else:
-            other.append(item)
+            if enforce_lang and matches_lang(snip, lang):
+                matched.append(item)
+            else:
+                other.append(item)
 
-    matched.sort(key=lambda x: x["views"], reverse=True)
-    other.sort(key=lambda x: x["views"], reverse=True)
+        matched.sort(key=lambda x: x["views"], reverse=True)
+        other.sort(key=lambda x: x["views"], reverse=True)
 
-    items = matched
-    if len(items) < max_results:
-        items = items + other
+        source_items = matched
+        if len(source_items) < max_results:
+            source_items = source_items + other
 
-    resp = {"items": items[:max_results], "nextPageToken": next_token}
-    cache_set(cache_key, resp)
+        cache_set_custom(source_cache_key, {"items": source_items}, 24 * 60 * 60)
+
+    page_items = source_items[offset:offset + max_results]
+    next_offset = offset + max_results
+    next_token = str(next_offset) if next_offset < len(source_items) else None
+    resp = {"items": page_items, "nextPageToken": next_token}
+    cache_set_custom(cache_key, resp, 24 * 60 * 60)
     return resp
 
 
