@@ -550,6 +550,9 @@ export default function App() {
   const [patternClusters, setPatternClusters] = useState([]);
   const [appliedPatternItems, setAppliedPatternItems] = useState([]);
   const [patternApplyingLive, setPatternApplyingLive] = useState(false);
+  const [patternMatchMode, setPatternMatchMode] = useState("exact");
+  const [patternMinSimilarity, setPatternMinSimilarity] = useState(0.7);
+  const [patternMatchMeta, setPatternMatchMeta] = useState(null);
   const [applyPatternId, setApplyPatternId] = useState("");
   const [activePattern, setActivePattern] = useState(null);
   const [comparePatternAId, setComparePatternAId] = useState("");
@@ -1265,6 +1268,7 @@ export default function App() {
         setActivePattern(payload.pattern || null);
         setApplyPatternId(targetId);
         setAppliedPatternItems([]);
+        setPatternMatchMeta(null);
       })
       .catch((err) => {
         setPatternError(err.message || "Failed to load pattern.");
@@ -1306,7 +1310,12 @@ export default function App() {
     fetch(apiUrl("/patterns/match"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pattern_id: patternId, items: candidates }),
+      body: JSON.stringify({
+        pattern_id: patternId,
+        items: candidates,
+        mode: patternMatchMode,
+        min_similarity: patternMatchMode === "loose" ? Number(patternMinSimilarity || 0) : 1,
+      }),
     })
       .then(async (r) => {
         updateGlobalLoading(loadingToken, "Matching cluster signatures...", 76);
@@ -1315,6 +1324,7 @@ export default function App() {
       })
       .then((payload) => {
         setAppliedPatternItems(payload?.matches || []);
+        setPatternMatchMeta(payload?.meta || null);
       })
       .catch((err) => {
         setPatternError(err.message || "Failed to apply pattern.");
@@ -1323,7 +1333,16 @@ export default function App() {
         setPatternApplyingLive(false);
         endGlobalLoading(loadingToken);
       });
-  }, [activePattern, applyPatternId, patternSourceItems, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
+  }, [
+    activePattern,
+    applyPatternId,
+    patternSourceItems,
+    patternMatchMode,
+    patternMinSimilarity,
+    startGlobalLoading,
+    updateGlobalLoading,
+    endGlobalLoading,
+  ]);
 
   const compareSavedPatterns = useCallback(() => {
     if (!isProUser) {
@@ -2474,6 +2493,29 @@ export default function App() {
                     Notes: {activePattern.notes}
                   </div>
                 )}
+                <div style={{ marginTop: 8, display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+                  <select
+                    value={patternMatchMode}
+                    onChange={(e) => setPatternMatchMode(e.target.value)}
+                    style={roundedFieldStyle}
+                  >
+                    <option value="exact">Exact Match</option>
+                    <option value="loose">Loose Match</option>
+                  </select>
+                  <select
+                    value={String(patternMinSimilarity)}
+                    onChange={(e) => setPatternMinSimilarity(Number(e.target.value))}
+                    style={roundedFieldStyle}
+                    disabled={patternMatchMode !== "loose"}
+                    title="Minimum similarity for loose mode"
+                  >
+                    <option value="0.5">50%+</option>
+                    <option value="0.6">60%+</option>
+                    <option value="0.7">70%+</option>
+                    <option value="0.8">80%+</option>
+                    <option value="0.9">90%+</option>
+                  </select>
+                </div>
                 <div style={{ marginTop: 8, display: "flex", justifyContent: "center" }}>
                   <button
                     type="button"
@@ -2557,11 +2599,20 @@ export default function App() {
               <>
                 <div style={{ ...infoBoxStyle, marginTop: 12, borderRadius: 10, padding: "10px 12px", textAlign: "center", fontSize: 12 }}>
                   Pattern matches in current source: {appliedPatternItems.length}
+                  {patternMatchMeta && (
+                    <span>
+                      {" "}
+                      | Mode: {patternMatchMeta.mode || "exact"}
+                      {patternMatchMeta.mode === "loose"
+                        ? ` (${Math.round(Number(patternMatchMeta.min_similarity || 0) * 100)}%+)`
+                        : ""}
+                    </span>
+                  )}
                 </div>
                 <ThumbnailGrid items={appliedPatternItems.map((item) => ({
                   id: item.video_id || item.thumbnail_url,
                   title: item.title || "Matched Thumbnail",
-                  channelTitle: item.channel_title || item.features?.quality_band || "Match",
+                  channelTitle: `${item.channel_title || item.features?.quality_band || "Match"} | similarity ${Math.round(Number(item.match_similarity || 0) * 100)}%`,
                   thumbnail: item.thumbnail_url,
                   views: 0,
                   source_group: item.cluster_id,

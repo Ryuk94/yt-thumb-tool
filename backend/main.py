@@ -170,6 +170,8 @@ class PatternUpdateRequest(BaseModel):
 class PatternMatchRequest(BaseModel):
     pattern_id: str
     items: list[PatternExtractItem] = Field(default_factory=list)
+    mode: str = "exact"  # exact | loose
+    min_similarity: float = 0.6
 
 
 class PatternImportRequest(BaseModel):
@@ -1989,6 +1991,11 @@ def match_pattern(payload: PatternMatchRequest, request: Request):
     if not pattern:
         raise HTTPException(status_code=404, detail="Pattern not found")
 
+    mode = (payload.mode or "exact").strip().lower()
+    if mode not in {"exact", "loose"}:
+        raise HTTPException(status_code=400, detail="mode must be one of: exact, loose")
+    min_similarity = max(0.0, min(float(payload.min_similarity or 0.0), 1.0))
+
     signatures = {
         str(cluster.get("signature") or "").strip()
         for cluster in (pattern.get("clusters") or [])
@@ -2006,7 +2013,41 @@ def match_pattern(payload: PatternMatchRequest, request: Request):
         }
 
     enriched = [_extract_pattern_item(item) for item in payload.items]
-    matches = [item for item in enriched if str(item.get("cluster_signature") or "").strip() in signatures]
+    if mode == "exact":
+        matches = [item for item in enriched if str(item.get("cluster_signature") or "").strip() in signatures]
+        for item in matches:
+            item["match_similarity"] = 1.0
+    else:
+        signature_tokens = [
+            {token for token in signature.split("|") if token}
+            for signature in signatures
+        ]
+
+        def best_similarity(candidate_signature: str) -> float:
+            candidate_tokens = {token for token in candidate_signature.split("|") if token}
+            if not candidate_tokens:
+                return 0.0
+            best = 0.0
+            for tokens in signature_tokens:
+                union = candidate_tokens | tokens
+                if not union:
+                    continue
+                score = float(len(candidate_tokens & tokens)) / float(len(union))
+                if score > best:
+                    best = score
+            return best
+
+        matches = []
+        for item in enriched:
+            candidate_signature = str(item.get("cluster_signature") or "").strip()
+            if not candidate_signature:
+                continue
+            similarity = best_similarity(candidate_signature)
+            if similarity >= min_similarity:
+                item["match_similarity"] = round(similarity, 4)
+                matches.append(item)
+
+        matches.sort(key=lambda item: float(item.get("match_similarity") or 0.0), reverse=True)
     return {
         "pattern_id": pattern_id,
         "matches": matches,
@@ -2014,6 +2055,8 @@ def match_pattern(payload: PatternMatchRequest, request: Request):
             "input_count": len(payload.items),
             "matched_count": len(matches),
             "signature_count": len(signatures),
+            "mode": mode,
+            "min_similarity": min_similarity,
         },
     }
 

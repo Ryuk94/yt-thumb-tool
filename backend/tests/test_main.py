@@ -467,6 +467,43 @@ def test_patterns_match(monkeypatch, tmp_path):
     assert payload["meta"]["input_count"] == 2
     assert payload["meta"]["matched_count"] == 2
     assert len(payload["matches"]) == 2
+    assert payload["meta"]["mode"] == "exact"
+    assert payload["matches"][0]["match_similarity"] == 1.0
+
+
+def test_patterns_match_loose(monkeypatch, tmp_path):
+    main_module.PATTERN_LIBRARY.clear()
+    monkeypatch.setattr(main_module, "PATTERN_LIBRARY_FILE", tmp_path / "pattern_library.json")
+    created = main_module.save_pattern(
+        main_module.PatternSaveRequest(
+            name="Loose",
+            clusters=[{"cluster_id": "cluster_1", "signature": "ar:portrait|face:1|text:0|quality:high|clutter:clean", "count": 1}],
+            filters={},
+        ),
+        make_request(),
+    )
+    pattern_id = created["pattern_id"]
+
+    monkeypatch.setattr(
+        main_module,
+        "_extract_pattern_item",
+        lambda item: {
+            "thumbnail_url": item.thumbnail_url,
+            "cluster_signature": "ar:portrait|face:1|text:1|quality:high|clutter:clean",
+        },
+    )
+    payload = main_module.match_pattern(
+        payload=main_module.PatternMatchRequest(
+            pattern_id=pattern_id,
+            items=[main_module.PatternExtractItem(thumbnail_url="https://img/a.jpg")],
+            mode="loose",
+            min_similarity=0.6,
+        ),
+        request=make_request(),
+    )
+    assert payload["meta"]["mode"] == "loose"
+    assert payload["meta"]["matched_count"] == 1
+    assert payload["matches"][0]["match_similarity"] >= 0.6
 
 
 def test_pattern_update(monkeypatch, tmp_path):
