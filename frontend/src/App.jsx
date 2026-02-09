@@ -1227,6 +1227,48 @@ export default function App() {
       });
   }, [isProUser, comparePatternAId, comparePatternBId, fetchPatternById, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
 
+  const deleteSavedPattern = useCallback((patternId) => {
+    if (!isProUser) {
+      setPatternError("Pattern management is a Pro feature.");
+      setPricingOpen(true);
+      return;
+    }
+    const targetId = String(patternId || "").trim();
+    if (!targetId) return;
+    setPatternError("");
+    const loadingToken = startGlobalLoading("Removing saved pattern...", 26);
+    fetch(apiUrl(`/patterns/${encodeURIComponent(targetId)}`), {
+      method: "DELETE",
+    })
+      .then(async (r) => {
+        updateGlobalLoading(loadingToken, "Updating pattern library...", 80);
+        if (!r.ok) throw new Error(await readApiErrorDetail(r, "Failed to delete pattern."));
+        return r.json();
+      })
+      .then(() => {
+        setSavedPatterns((prev) => prev.filter((item) => item.pattern_id !== targetId));
+        if (applyPatternId === targetId) setApplyPatternId("");
+        if (comparePatternAId === targetId) setComparePatternAId("");
+        if (comparePatternBId === targetId) setComparePatternBId("");
+        if (activePattern?.pattern_id === targetId) setActivePattern(null);
+        fetchSavedPatterns(true);
+      })
+      .catch((err) => {
+        setPatternError(err.message || "Failed to delete pattern.");
+      })
+      .finally(() => endGlobalLoading(loadingToken));
+  }, [
+    isProUser,
+    applyPatternId,
+    comparePatternAId,
+    comparePatternBId,
+    activePattern,
+    startGlobalLoading,
+    updateGlobalLoading,
+    endGlobalLoading,
+    fetchSavedPatterns,
+  ]);
+
   const onProfileKeyDown = (e) => {
     if (e.key === "Enter") fetchProfile(true);
   };
@@ -1645,14 +1687,29 @@ export default function App() {
             {!!savedPatterns.length && (
               <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
                 {savedPatterns.slice(0, 10).map((pattern) => (
-                  <button
-                    key={pattern.pattern_id}
-                    type="button"
-                    onClick={() => applySavedPattern(pattern.pattern_id)}
-                    style={tabButtonStyle(false)}
-                  >
-                    {pattern.name}
-                  </button>
+                  <div key={pattern.pattern_id} style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                    <button
+                      type="button"
+                      onClick={() => applySavedPattern(pattern.pattern_id)}
+                      style={tabButtonStyle(false)}
+                    >
+                      {pattern.name}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Delete ${pattern.name}`}
+                      onClick={() => deleteSavedPattern(pattern.pattern_id)}
+                      style={{
+                        ...tabButtonStyle(false),
+                        minWidth: 36,
+                        padding: "8px 10px",
+                        borderColor: "#b00020",
+                        color: "#b00020",
+                      }}
+                    >
+                      {"\u2715"}
+                    </button>
+                  </div>
                 ))}
               </div>
             )}

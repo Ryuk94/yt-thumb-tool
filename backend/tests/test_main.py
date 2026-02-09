@@ -371,3 +371,9 @@ def test_patterns_extract_save_apply(monkeypatch, tmp_path):
     listed = main_module.list_patterns(make_request())
     assert listed["items"]
     assert listed["items"][0]["pattern_id"] == pattern_id
+
+    deleted = main_module.delete_pattern(pattern_id, make_request())
+    assert deleted["ok"] is True
+    assert deleted["pattern_id"] == pattern_id
+    listed_after_delete = main_module.list_patterns(make_request())
+    assert all(item["pattern_id"] != pattern_id for item in listed_after_delete["items"])

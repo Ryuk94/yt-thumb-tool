@@ -1737,6 +1737,18 @@ def apply_pattern(pattern_id: str, request: Request):
     return {"pattern_id": pattern_id, "pattern": pattern}
 
 
+@app.delete("/patterns/{pattern_id}")
+def delete_pattern(pattern_id: str, request: Request):
+    enforce_api_rate_limit(request, scope="patterns_delete")
+    with PATTERN_LIBRARY_LOCK:
+        existed = PATTERN_LIBRARY.pop(pattern_id, None)
+        snapshot = dict(PATTERN_LIBRARY)
+    if not existed:
+        raise HTTPException(status_code=404, detail="Pattern not found")
+    persist_pattern_library(snapshot)
+    return {"ok": True, "pattern_id": pattern_id}
+
+
 @app.get("/top")
 def top(
     request: Request,
