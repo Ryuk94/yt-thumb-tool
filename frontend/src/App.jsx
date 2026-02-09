@@ -235,6 +235,17 @@ function ThumbnailGrid({ items, portraitMode = false }) {
                 })
               );
             }}
+            onMouseEnter={() => {
+              window.dispatchEvent(
+                new CustomEvent("thumbnail-hovered", {
+                  detail: {
+                    id,
+                    title: v.title,
+                    channelTitle: channel,
+                  },
+                })
+              );
+            }}
           >
             {portraitMode ? (
               <div style={{ width: "100%", aspectRatio: "9 / 16", background: "#111" }}>
@@ -400,6 +411,24 @@ function readCookie(name) {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+function ProPrompt({ open, darkMode, title, message, cta, onClose }) {
+  if (!open) return null;
+  return (
+    <div className={`pro-prompt ${darkMode ? "pro-prompt--dark" : "pro-prompt--light"}`}>
+      <div className="pro-prompt__title">{title}</div>
+      <div className="pro-prompt__message">{message}</div>
+      <div className="pro-prompt__actions">
+        <button type="button" className="pro-prompt__cta">
+          {cta}
+        </button>
+        <button type="button" className="pro-prompt__dismiss" onClick={onClose}>
+          Later
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function writeCookie(name, value, days = 365) {
   if (typeof document === "undefined") return;
   const expires = new Date(Date.now() + days * 864e5).toUTCString();
@@ -459,6 +488,8 @@ export default function App() {
   const loadingTokenRef = useRef(0);
   const noticeTimeoutRef = useRef(null);
   const [previewItem, setPreviewItem] = useState(null);
+  const [proPrompt, setProPrompt] = useState({ open: false, title: "", message: "", cta: "" });
+  const onboardingFlagsRef = useRef({ scrollPromptShown: false, hoverPromptShown: false });
 
   const isShorts = type === "shorts";
   const baseUrl = useMemo(() => (isShorts ? apiUrl("/discover") : apiUrl("/top")), [isShorts]);
@@ -561,6 +592,37 @@ export default function App() {
     return () => {
       if (noticeTimeoutRef.current) window.clearTimeout(noticeTimeoutRef.current);
     };
+  }, []);
+
+  useEffect(() => {
+    const onScroll = () => {
+      if (onboardingFlagsRef.current.scrollPromptShown) return;
+      if (window.scrollY < 900) return;
+      onboardingFlagsRef.current.scrollPromptShown = true;
+      setProPrompt({
+        open: true,
+        title: "Scale Deeper Research",
+        message: "Unlock unlimited channel sweeps, full time ranges, and saved pattern libraries.",
+        cta: "Upgrade to Pro",
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    const onHoverThumb = () => {
+      if (onboardingFlagsRef.current.hoverPromptShown) return;
+      onboardingFlagsRef.current.hoverPromptShown = true;
+      setProPrompt({
+        open: true,
+        title: "Save Winning Patterns",
+        message: "Capture this style as a reusable pattern and compare it across channels over time.",
+        cta: "Enable Pattern Library",
+      });
+    };
+    window.addEventListener("thumbnail-hovered", onHoverThumb);
+    return () => window.removeEventListener("thumbnail-hovered", onHoverThumb);
   }, []);
 
   const buildParams = (pageToken = null) => {
@@ -1153,6 +1215,14 @@ export default function App() {
       >
         {darkMode ? "\u2600\uFE0F" : "\uD83C\uDF19"}
       </button>
+      <ProPrompt
+        open={proPrompt.open}
+        darkMode={darkMode}
+        title={proPrompt.title}
+        message={proPrompt.message}
+        cta={proPrompt.cta}
+        onClose={() => setProPrompt((prev) => ({ ...prev, open: false }))}
+      />
     </div>
   );
 }
