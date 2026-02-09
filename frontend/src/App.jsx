@@ -845,18 +845,6 @@ export default function App() {
       return;
     }
 
-    const token = reset ? null : profileNextToken;
-    if (!reset && !token) return;
-
-    const params = new URLSearchParams({
-      profile_url: cleaned,
-      content_type: profileType,
-      sort: profileSort,
-      max_results: "24",
-      strict_shorts: "true",
-    });
-    if (token) params.set("page_token", token);
-
     if (reset) {
       setProfileItems([]);
       setProfileNextToken(null);
@@ -865,29 +853,75 @@ export default function App() {
 
     setProfileError("");
     setProfileLoading(true);
-    const loadingToken = startGlobalLoading(reset ? "Resolving channel..." : "Loading more profile items...", 12);
+    const loadingToken = startGlobalLoading("Resolving channel...", 12);
 
-    fetch(`${apiUrl("/profile")}?${params.toString()}`)
-      .then(async (r) => {
-        updateGlobalLoading(loadingToken, "Fetching profile thumbnails...", 54);
-        if (!r.ok) throw new Error(await readApiErrorDetail(r, "Failed to load profile feed."));
-        return r.json();
-      })
-      .then((d) => {
+    const resolveAndFetch = async () => {
+      const resolveResp = await fetch(apiUrl("/resolve"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: cleaned }),
+      });
+      if (!resolveResp.ok) throw new Error(await readApiErrorDetail(resolveResp, "Failed to resolve channel."));
+      const resolved = await resolveResp.json();
+      const channelId = resolved?.channel_id;
+      if (!channelId) throw new Error("Could not resolve channel ID.");
+
+      updateGlobalLoading(loadingToken, "Fetching channel videos...", 56);
+      const params = new URLSearchParams({
+        content_type: profileType,
+        sort: profileSort,
+        max_results: "24",
+      });
+      const videosResp = await fetch(`${apiUrl(`/youtube/channel/${encodeURIComponent(channelId)}/videos`)}?${params.toString()}`);
+      if (!videosResp.ok) throw new Error(await readApiErrorDetail(videosResp, "Failed to load profile feed."));
+      const payload = await videosResp.json();
+      return { payload, channelId };
+    };
+
+    const legacyFallback = async () => {
+      updateGlobalLoading(loadingToken, "Using compatibility fallback...", 56);
+      const params = new URLSearchParams({
+        profile_url: cleaned,
+        content_type: profileType,
+        sort: profileSort,
+        max_results: "24",
+        strict_shorts: "true",
+      });
+      const response = await fetch(`${apiUrl("/profile")}?${params.toString()}`);
+      if (!response.ok) throw new Error(await readApiErrorDetail(response, "Failed to load profile feed."));
+      return response.json();
+    };
+
+    resolveAndFetch()
+      .then(({ payload, channelId }) => {
         updateGlobalLoading(loadingToken, "Composing profile grid...", 86);
-        const channelId = d?.meta?.channel_id || null;
-        const next = (d.items || []).map((item) => ({
+        const next = (payload.items || []).map((item) => ({
           ...item,
           channel_id: item.channel_id || channelId,
         }));
-        setProfileItems((prev) => (reset ? next : [...prev, ...next]));
-        setProfileNextToken(d.nextPageToken || null);
+        setProfileItems(next);
+        setProfileNextToken(null);
         if (reset) persistProfileSearch(cleaned);
       })
-      .catch((err) => {
-        setProfileError(err.message || "Failed to load profile feed.");
-        if (isQuotaErrorText(err.message)) {
-          showGlobalNotice("YouTube quota exhausted. Profile results may be partial.", "warn");
+      .catch(async (primaryErr) => {
+        try {
+          const fallbackPayload = await legacyFallback();
+          updateGlobalLoading(loadingToken, "Composing profile grid...", 86);
+          const channelId = fallbackPayload?.meta?.channel_id || null;
+          const next = (fallbackPayload.items || []).map((item) => ({
+            ...item,
+            channel_id: item.channel_id || channelId,
+          }));
+          setProfileItems(next);
+          setProfileNextToken(fallbackPayload.nextPageToken || null);
+          if (reset) persistProfileSearch(cleaned);
+          showGlobalNotice("Profile loaded via compatibility path.", "info", 2600);
+        } catch (fallbackErr) {
+          const message = fallbackErr?.message || primaryErr?.message || "Failed to load profile feed.";
+          setProfileError(message);
+          if (isQuotaErrorText(message)) {
+            showGlobalNotice("YouTube quota exhausted. Profile results may be partial.", "warn");
+          }
         }
       })
       .finally(() => {
