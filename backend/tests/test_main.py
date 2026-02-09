@@ -523,6 +523,9 @@ def test_pattern_list_query_sort(monkeypatch, tmp_path):
     pinned_only_after = main_module.list_patterns(make_request(), sort="pinned_recent", pinned_only=1, limit=10, offset=0)
     assert len(pinned_only_after["items"]) == 1
 
+    updated_sort = main_module.list_patterns(make_request(), sort="updated", limit=10, offset=0)
+    assert updated_sort["items"][0]["pattern_id"] == first_id
+
 
 def test_pattern_export_import(monkeypatch, tmp_path):
     main_module.PATTERN_LIBRARY.clear()

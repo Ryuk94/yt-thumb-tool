@@ -1729,15 +1729,15 @@ def save_pattern(payload: PatternSaveRequest, request: Request):
 def list_patterns(
     request: Request,
     query: str | None = None,
-    sort: str = "recent",  # recent | oldest | name | pinned_recent
+    sort: str = "recent",  # recent | oldest | name | pinned_recent | updated
     pinned_only: int = 0,
     limit: int = 100,
     offset: int = 0,
 ):
     enforce_api_rate_limit(request, scope="patterns_list")
     sort_mode = (sort or "recent").lower()
-    if sort_mode not in {"recent", "oldest", "name", "pinned_recent"}:
-        raise HTTPException(status_code=400, detail="sort must be one of: recent, oldest, name, pinned_recent")
+    if sort_mode not in {"recent", "oldest", "name", "pinned_recent", "updated"}:
+        raise HTTPException(status_code=400, detail="sort must be one of: recent, oldest, name, pinned_recent, updated")
     limit = max(1, min(limit, 500))
     offset = max(0, offset)
     needle = (query or "").strip().lower()
@@ -1759,6 +1759,14 @@ def list_patterns(
         patterns.sort(key=lambda item: str(item.get("name") or "").lower())
     elif sort_mode == "oldest":
         patterns.sort(key=lambda item: str(item.get("created_at") or ""), reverse=False)
+    elif sort_mode == "updated":
+        patterns.sort(
+            key=lambda item: (
+                str(item.get("updated_at") or item.get("created_at") or ""),
+                str(item.get("created_at") or ""),
+            ),
+            reverse=True,
+        )
     elif sort_mode == "pinned_recent":
         patterns.sort(
             key=lambda item: (

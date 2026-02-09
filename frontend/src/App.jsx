@@ -2002,6 +2002,7 @@ export default function App() {
                 minWidth={124}
                 options={[
                   { value: "recent", label: "Recent" },
+                  { value: "updated", label: "Updated" },
                   { value: "oldest", label: "Oldest" },
                   { value: "name", label: "Name" },
                   { value: "pinned_recent", label: "Pinned" },
