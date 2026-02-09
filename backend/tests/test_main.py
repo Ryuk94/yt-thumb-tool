@@ -295,7 +295,8 @@ def test_channel_videos_endpoint(monkeypatch):
         channel_identifier="UC_TEST",
         content_type="all",
         sort="popular",
-        max_results=24,
+        max_results=2,
+        offset=0,
     )
     shorts_payload = channel_videos(
         request=request,
@@ -311,12 +312,23 @@ def test_channel_videos_endpoint(monkeypatch):
         sort="recent",
         max_results=24,
     )
+    next_page = channel_videos(
+        request=request,
+        channel_identifier="UC_TEST",
+        content_type="all",
+        sort="popular",
+        max_results=2,
+        offset=2,
+    )
 
-    assert len(all_payload["items"]) == 3
+    assert len(all_payload["items"]) == 2
+    assert all_payload["nextPageToken"] == "2"
     assert all_payload["meta"]["channel_id"] == "UC_TEST"
     assert len(shorts_payload["items"]) == 1
     assert shorts_payload["items"][0]["id"] == "s1"
     assert all(item["duration"] > 60 for item in videos_payload["items"])
+    assert len(next_page["items"]) == 1
+    assert next_page["nextPageToken"] is None
 
 
 def test_resolve_endpoint(monkeypatch):

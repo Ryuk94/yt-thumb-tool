@@ -2785,8 +2785,10 @@ def channel_videos(
     content_type: str = "all",  # all | shorts | videos
     sort: str = "recent",  # recent | popular
     max_results: int = 24,
+    offset: int = 0,
 ):
     max_results = max(1, min(max_results, 50))
+    offset = max(0, offset)
     content_type = (content_type or "all").lower()
     if content_type not in {"all", "shorts", "videos"}:
         raise HTTPException(status_code=400, detail="content_type must be one of: all, shorts, videos")
@@ -2797,7 +2799,9 @@ def channel_videos(
     enforce_api_rate_limit(request, scope="channel_videos")
 
     resolved_id = resolve_channel_id(channel_identifier)
-    cache_key = f"channel-videos:{FILTER_CACHE_VERSION}:{resolved_id}:{content_type}:{sort_mode}:{max_results}"
+    cache_key = (
+        f"channel-videos:{FILTER_CACHE_VERSION}:{resolved_id}:{content_type}:{sort_mode}:{max_results}:{offset}"
+    )
     cached = cache_get(cache_key)
     if cached is not None:
         return cached
@@ -2826,13 +2830,19 @@ def channel_videos(
     items = sort_profile_items(items, sort_mode)
     typed_items = _filter_profile_items_by_type(items, content_type)
 
+    page_items = typed_items[offset:offset + max_results]
+    next_offset = offset + max_results if (offset + max_results) < len(typed_items) else None
     resp = {
-        "items": typed_items[:max_results],
+        "items": page_items,
+        "nextPageToken": str(next_offset) if next_offset is not None else None,
         "meta": {
             "channel_id": resolved_id,
             "content_type": content_type,
             "sort": sort_mode,
             "candidate_count": len(items),
+            "total_count": len(typed_items),
+            "offset": offset,
+            "has_more": next_offset is not None,
         },
     }
     cache_set_custom(cache_key, resp, PROFILE_GRID_CACHE_TTL_SECONDS)

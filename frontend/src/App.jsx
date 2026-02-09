@@ -516,6 +516,7 @@ export default function App() {
   const [profileSort, setProfileSort] = useState("recent");
   const [profileItems, setProfileItems] = useState([]);
   const [profileNextToken, setProfileNextToken] = useState(null);
+  const [profileResolvedChannelId, setProfileResolvedChannelId] = useState("");
   const [profileError, setProfileError] = useState("");
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileHasSearched, setProfileHasSearched] = useState(false);
@@ -847,6 +848,7 @@ export default function App() {
   }, [baseUrl, region, type, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
 
   const canLoadMoreTrending = isShorts ? !!nextTokenDiscover : !!nextTokenTop;
+  const canLoadMoreProfile = !!profileNextToken && !profileLoading;
 
   const loadMoreTrending = () => {
     const token = isShorts ? nextTokenDiscover : nextTokenTop;
@@ -890,14 +892,17 @@ export default function App() {
 
   const fetchProfile = (reset = false, explicitProfileUrl = null) => {
     const cleaned = (explicitProfileUrl ?? profileUrl).trim();
-    if (!cleaned) {
+    if (reset && !cleaned) {
       setProfileError("Enter a YouTube profile URL, handle, or channel ID.");
       return;
     }
+    if (!reset && !profileResolvedChannelId) return;
 
+    const offset = reset ? 0 : Number(profileNextToken || 0);
     if (reset) {
       setProfileItems([]);
       setProfileNextToken(null);
+      setProfileResolvedChannelId("");
       setProfileHasSearched(true);
     }
 
@@ -906,21 +911,25 @@ export default function App() {
     const loadingToken = startGlobalLoading("Resolving channel...", 12);
 
     const resolveAndFetch = async () => {
-      const resolveResp = await fetch(apiUrl("/resolve"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: cleaned }),
-      });
-      if (!resolveResp.ok) throw new Error(await readApiErrorDetail(resolveResp, "Failed to resolve channel."));
-      const resolved = await resolveResp.json();
-      const channelId = resolved?.channel_id;
-      if (!channelId) throw new Error("Could not resolve channel ID.");
+      let channelId = profileResolvedChannelId;
+      if (reset) {
+        const resolveResp = await fetch(apiUrl("/resolve"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: cleaned }),
+        });
+        if (!resolveResp.ok) throw new Error(await readApiErrorDetail(resolveResp, "Failed to resolve channel."));
+        const resolved = await resolveResp.json();
+        channelId = resolved?.channel_id;
+        if (!channelId) throw new Error("Could not resolve channel ID.");
+      }
 
       updateGlobalLoading(loadingToken, "Fetching channel videos...", 56);
       const params = new URLSearchParams({
         content_type: profileType,
         sort: profileSort,
         max_results: "24",
+        offset: String(offset),
       });
       const videosResp = await fetch(`${apiUrl(`/youtube/channel/${encodeURIComponent(channelId)}/videos`)}?${params.toString()}`);
       if (!videosResp.ok) throw new Error(await readApiErrorDetail(videosResp, "Failed to load profile feed."));
@@ -949,8 +958,9 @@ export default function App() {
           ...item,
           channel_id: item.channel_id || channelId,
         }));
-        setProfileItems(next);
-        setProfileNextToken(null);
+        setProfileItems((prev) => (reset ? next : [...prev, ...next]));
+        setProfileNextToken(payload.nextPageToken || null);
+        setProfileResolvedChannelId(channelId || "");
         if (reset) persistProfileSearch(cleaned);
       })
       .catch(async (primaryErr) => {
@@ -962,8 +972,9 @@ export default function App() {
             ...item,
             channel_id: item.channel_id || channelId,
           }));
-          setProfileItems(next);
+          setProfileItems((prev) => (reset ? next : [...prev, ...next]));
           setProfileNextToken(fallbackPayload.nextPageToken || null);
+          setProfileResolvedChannelId(channelId || "");
           if (reset) persistProfileSearch(cleaned);
           showGlobalNotice("Profile loaded via compatibility path.", "info", 2600);
         } catch (fallbackErr) {
@@ -1980,7 +1991,14 @@ export default function App() {
             {profileLoading ? (
               <div style={{ minHeight: 240 }} />
             ) : (
-              <ThumbnailGrid items={profileItems} portraitMode={profileType === "shorts"} />
+              <>
+                <ThumbnailGrid items={profileItems} portraitMode={profileType === "shorts"} />
+                <LoadMoreButton
+                  onClick={() => fetchProfile(false)}
+                  disabled={!canLoadMoreProfile}
+                  style={actionButtonStyle(!canLoadMoreProfile)}
+                />
+              </>
             )}
           </>
         )}
