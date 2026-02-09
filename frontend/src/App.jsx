@@ -1347,6 +1347,56 @@ export default function App() {
     fetchSavedPatterns,
   ]);
 
+  const editPatternNotes = useCallback((pattern) => {
+    if (!isProUser) {
+      setPatternError("Pattern management is a Pro feature.");
+      setPricingOpen(true);
+      return;
+    }
+    const patternId = String(pattern?.pattern_id || "").trim();
+    if (!patternId) return;
+    const currentNotes = String(pattern?.notes || "").trim();
+    const nextNotes = window.prompt("Edit pattern notes", currentNotes);
+    if (nextNotes == null) return;
+    const loadingToken = startGlobalLoading("Updating pattern notes...", 26);
+    setPatternError("");
+    fetch(apiUrl(`/patterns/${encodeURIComponent(patternId)}`), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ notes: nextNotes }),
+    })
+      .then(async (r) => {
+        updateGlobalLoading(loadingToken, "Saving notes...", 80);
+        if (!r.ok) throw new Error(await readApiErrorDetail(r, "Failed to update notes."));
+        return r.json();
+      })
+      .then((payload) => {
+        const updated = payload?.pattern || {};
+        setSavedPatterns((prev) =>
+          prev.map((entry) =>
+            entry.pattern_id === patternId
+              ? { ...entry, notes: updated.notes || null, updated_at: updated.updated_at || entry.updated_at }
+              : entry
+          )
+        );
+        if (activePattern?.pattern_id === patternId) {
+          setActivePattern((prev) => (prev ? { ...prev, notes: updated.notes || null } : prev));
+        }
+        fetchSavedPatterns(true);
+      })
+      .catch((err) => {
+        setPatternError(err.message || "Failed to update notes.");
+      })
+      .finally(() => endGlobalLoading(loadingToken));
+  }, [
+    isProUser,
+    activePattern,
+    startGlobalLoading,
+    updateGlobalLoading,
+    endGlobalLoading,
+    fetchSavedPatterns,
+  ]);
+
   const onProfileKeyDown = (e) => {
     if (e.key === "Enter") fetchProfile(true);
   };
@@ -1812,6 +1862,18 @@ export default function App() {
                     </button>
                     <button
                       type="button"
+                      aria-label={`Edit notes for ${pattern.name}`}
+                      onClick={() => editPatternNotes(pattern)}
+                      style={{
+                        ...tabButtonStyle(false),
+                        minWidth: 36,
+                        padding: "8px 10px",
+                      }}
+                    >
+                      N
+                    </button>
+                    <button
+                      type="button"
                       aria-label={`Delete ${pattern.name}`}
                       onClick={() => deleteSavedPattern(pattern.pattern_id)}
                       style={{
@@ -1854,6 +1916,11 @@ export default function App() {
                 <div style={{ marginTop: 6, fontSize: 12, textAlign: "center" }}>
                   Saved clusters: {(activePattern.clusters || []).length}
                 </div>
+                {!!activePattern.notes && (
+                  <div style={{ marginTop: 6, fontSize: 12, textAlign: "center", opacity: 0.85 }}>
+                    Notes: {activePattern.notes}
+                  </div>
+                )}
               </div>
             )}
 

@@ -1725,6 +1725,8 @@ def list_patterns(request: Request):
             "pattern_id": pattern.get("pattern_id"),
             "name": pattern.get("name"),
             "created_at": pattern.get("created_at"),
+            "updated_at": pattern.get("updated_at"),
+            "notes": pattern.get("notes"),
             "cluster_count": len(pattern.get("clusters") or []),
         }
         for pattern in patterns

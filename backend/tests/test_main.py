@@ -440,3 +440,5 @@ def test_pattern_update(monkeypatch, tmp_path):
     assert updated["pattern"]["name"] == "renamed"
     assert updated["pattern"]["notes"] == "note"
     assert updated["pattern"].get("updated_at")
+    listed = main_module.list_patterns(make_request())
+    assert listed["items"][0]["notes"] == "note"
