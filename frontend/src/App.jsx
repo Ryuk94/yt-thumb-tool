@@ -416,19 +416,64 @@ function readCookie(name) {
   return match ? decodeURIComponent(match[1]) : null;
 }
 
-function ProPrompt({ open, darkMode, title, message, cta, onClose }) {
+function ProPrompt({ open, darkMode, title, message, cta, onClose, onAction }) {
   if (!open) return null;
   return (
     <div className={`pro-prompt ${darkMode ? "pro-prompt--dark" : "pro-prompt--light"}`}>
       <div className="pro-prompt__title">{title}</div>
       <div className="pro-prompt__message">{message}</div>
       <div className="pro-prompt__actions">
-        <button type="button" className="pro-prompt__cta">
+        <button type="button" className="pro-prompt__cta" onClick={onAction}>
           {cta}
         </button>
         <button type="button" className="pro-prompt__dismiss" onClick={onClose}>
           Later
         </button>
+      </div>
+    </div>
+  );
+}
+
+function PricingModal({ open, darkMode, isProUser, onClose, onUpgrade }) {
+  if (!open) return null;
+  return (
+    <div className="pricing-modal-overlay" onClick={onClose}>
+      <div className={`pricing-modal ${darkMode ? "pricing-modal--dark" : "pricing-modal--light"}`} onClick={(e) => e.stopPropagation()}>
+        <div className="pricing-modal__title">Choose Your Plan</div>
+        <div className="pricing-modal__subtitle">Unlock pattern library, comparisons, and full-range channel research.</div>
+        <div className="pricing-modal__grid">
+          <div className="pricing-plan">
+            <div className="pricing-plan__name">Free</div>
+            <div className="pricing-plan__price">GBP 0</div>
+            <div className="pricing-plan__period">forever</div>
+            <div className="pricing-plan__feature">Basic trending/profile discovery</div>
+            <div className="pricing-plan__feature">Pattern extraction preview</div>
+            <div className="pricing-plan__feature pricing-plan__feature--muted">No saved library</div>
+          </div>
+          <div className="pricing-plan pricing-plan--pro">
+            <div className="pricing-plan__name">Pro Monthly</div>
+            <div className="pricing-plan__price">GBP 15</div>
+            <div className="pricing-plan__period">per month</div>
+            <div className="pricing-plan__feature">Unlimited channels</div>
+            <div className="pricing-plan__feature">Pattern library + comparisons</div>
+            <div className="pricing-plan__feature">Extended windows + exports</div>
+            <button className="pricing-plan__cta" onClick={() => onUpgrade("monthly")}>
+              Upgrade Monthly
+            </button>
+          </div>
+          <div className="pricing-plan pricing-plan--pro">
+            <div className="pricing-plan__name">Pro Annual</div>
+            <div className="pricing-plan__price">GBP 120</div>
+            <div className="pricing-plan__period">per year</div>
+            <div className="pricing-plan__feature">All Pro features</div>
+            <div className="pricing-plan__feature">Save 33% vs monthly</div>
+            <div className="pricing-plan__feature">Priority roadmap access</div>
+            <button className="pricing-plan__cta" onClick={() => onUpgrade("annual")}>
+              Upgrade Annual
+            </button>
+          </div>
+        </div>
+        {isProUser && <div className="pricing-modal__pro-state">Pro mode is enabled for this account.</div>}
       </div>
     </div>
   );
@@ -518,6 +563,14 @@ export default function App() {
   const [previewItem, setPreviewItem] = useState(null);
   const [proPrompt, setProPrompt] = useState({ open: false, title: "", message: "", cta: "" });
   const onboardingFlagsRef = useRef({ scrollPromptShown: false, hoverPromptShown: false });
+  const [pricingOpen, setPricingOpen] = useState(false);
+  const [isProUser, setIsProUser] = useState(() => {
+    try {
+      return localStorage.getItem("isProUser") === "1";
+    } catch {
+      return false;
+    }
+  });
 
   const isShorts = type === "shorts";
   const baseUrl = useMemo(() => (isShorts ? apiUrl("/discover") : apiUrl("/top")), [isShorts]);
@@ -606,6 +659,14 @@ export default function App() {
       // ignore
     }
   }, [savedPatterns]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("isProUser", isProUser ? "1" : "0");
+    } catch {
+      // ignore
+    }
+  }, [isProUser]);
 
   useEffect(() => {
     if (!savedPatterns.length) return;
@@ -968,6 +1029,11 @@ export default function App() {
   }, [patternSourceItems, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
 
   const saveCurrentPattern = useCallback(() => {
+    if (!isProUser) {
+      setPatternError("Saving patterns is a Pro feature.");
+      setPricingOpen(true);
+      return;
+    }
     if (!patternClusters.length) {
       setPatternError("Extract patterns first before saving.");
       return;
@@ -1023,6 +1089,7 @@ export default function App() {
         endGlobalLoading(loadingToken);
       });
   }, [
+    isProUser,
     patternClusters,
     patternName,
     patternSource,
@@ -1070,6 +1137,11 @@ export default function App() {
   }, [applyPatternId, fetchPatternById, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
 
   const compareSavedPatterns = useCallback(() => {
+    if (!isProUser) {
+      setPatternError("Pattern comparison is a Pro feature.");
+      setPricingOpen(true);
+      return;
+    }
     const idA = String(comparePatternAId || "").trim();
     const idB = String(comparePatternBId || "").trim();
     if (!idA || !idB) {
@@ -1093,7 +1165,7 @@ export default function App() {
         setPatternComparing(false);
         endGlobalLoading(loadingToken);
       });
-  }, [comparePatternAId, comparePatternBId, fetchPatternById, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
+  }, [isProUser, comparePatternAId, comparePatternBId, fetchPatternById, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
 
   const onProfileKeyDown = (e) => {
     if (e.key === "Enter") fetchProfile(true);
@@ -1427,6 +1499,14 @@ export default function App() {
 
         {tab === "patterns" && (
           <>
+            {!isProUser && (
+              <div style={{ ...infoBoxStyle, marginTop: 10, borderRadius: 10, padding: "10px 12px", textAlign: "center", fontSize: 12 }}>
+                Free mode active: extraction only. Upgrade to unlock save + compare.
+                <button type="button" style={{ ...tabButtonStyle(false), marginLeft: 10 }} onClick={() => setPricingOpen(true)}>
+                  View Pro
+                </button>
+              </div>
+            )}
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "center" }}>
               <RoundedDropdown
                 value={patternSource}
@@ -1621,7 +1701,22 @@ export default function App() {
         title={proPrompt.title}
         message={proPrompt.message}
         cta={proPrompt.cta}
+        onAction={() => {
+          setPricingOpen(true);
+          setProPrompt((prev) => ({ ...prev, open: false }));
+        }}
         onClose={() => setProPrompt((prev) => ({ ...prev, open: false }))}
+      />
+      <PricingModal
+        open={pricingOpen}
+        darkMode={darkMode}
+        isProUser={isProUser}
+        onClose={() => setPricingOpen(false)}
+        onUpgrade={() => {
+          setIsProUser(true);
+          setPricingOpen(false);
+          showGlobalNotice("Pro unlocked for this session.", "info", 2800);
+        }}
       />
     </div>
   );

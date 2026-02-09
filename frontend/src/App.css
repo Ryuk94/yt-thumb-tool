@@ -251,6 +251,111 @@
   cursor: pointer;
 }
 
+.pricing-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  display: grid;
+  place-items: center;
+  background: rgba(12, 15, 20, 0.48);
+  backdrop-filter: blur(4px);
+}
+
+.pricing-modal {
+  width: min(980px, calc(100vw - 24px));
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 28px 50px rgba(0, 0, 0, 0.3);
+  padding: 16px;
+}
+
+.pricing-modal--dark {
+  background: rgba(16, 18, 24, 0.97);
+  color: #f4f6f8;
+}
+
+.pricing-modal--light {
+  background: rgba(255, 255, 255, 0.99);
+  color: #151a22;
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+.pricing-modal__title {
+  font-size: 20px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.pricing-modal__subtitle {
+  font-size: 13px;
+  text-align: center;
+  margin-top: 6px;
+  opacity: 0.82;
+}
+
+.pricing-modal__grid {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.pricing-plan {
+  border-radius: 12px;
+  border: 1px solid rgba(138, 149, 164, 0.35);
+  padding: 12px;
+  text-align: left;
+}
+
+.pricing-plan--pro {
+  border-color: rgba(255, 79, 69, 0.45);
+  box-shadow: 0 10px 20px rgba(255, 76, 63, 0.12);
+}
+
+.pricing-plan__name {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.pricing-plan__price {
+  font-size: 24px;
+  font-weight: 800;
+  margin-top: 4px;
+}
+
+.pricing-plan__period {
+  font-size: 12px;
+  opacity: 0.72;
+}
+
+.pricing-plan__feature {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.pricing-plan__feature--muted {
+  opacity: 0.55;
+}
+
+.pricing-plan__cta {
+  margin-top: 10px;
+  border: 0;
+  border-radius: 999px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(90deg, #ff3b3f, #ff6b4a);
+  cursor: pointer;
+}
+
+.pricing-modal__pro-state {
+  margin-top: 12px;
+  text-align: center;
+  font-size: 12px;
+  color: #0b8f3a;
+}
+
 button:not(:disabled),
 .thumb-card {
   transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
