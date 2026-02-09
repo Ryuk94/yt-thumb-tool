@@ -25,6 +25,87 @@ const PATTERN_SOURCE_OPTIONS = [
   { value: "trending", label: "Trending" },
   { value: "profile", label: "Profile" },
 ];
+const PATTERN_FORMAT_OPTIONS = [
+  { value: "all", label: "All" },
+  { value: "shorts", label: "Shorts" },
+  { value: "videos", label: "Long-form" },
+];
+const CLUSTER_COLOR_PALETTE = [
+  "#2D6CDF",
+  "#00A7A0",
+  "#B26BFF",
+  "#FF7A45",
+  "#33A853",
+  "#EB5757",
+  "#F2C94C",
+  "#56CCF2",
+  "#6FCF97",
+  "#9B51E0",
+];
+
+function hashString(value) {
+  const text = String(value || "");
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    hash = (hash * 31 + text.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+function clusterColorFromId(clusterId) {
+  const idx = hashString(clusterId) % CLUSTER_COLOR_PALETTE.length;
+  return CLUSTER_COLOR_PALETTE[idx];
+}
+
+function parseSignatureTokens(signature) {
+  const out = {};
+  String(signature || "")
+    .split("|")
+    .forEach((part) => {
+      const [key, value] = String(part).split(":");
+      if (key && value) out[key.trim()] = value.trim();
+    });
+  return out;
+}
+
+function buildClusterDisplayName(cluster) {
+  const tokens = parseSignatureTokens(cluster?.signature);
+  const arRaw = tokens.ar || "unknown";
+  const ar = arRaw === "portrait" ? "Shorts" : arRaw === "landscape" ? "Long-form" : arRaw === "square" ? "Square" : "Mixed";
+  const face = tokens.face === "1" ? "Face" : "No Face";
+  const text = tokens.text === "1" ? "Text" : "No Text";
+  const quality = tokens.quality ? `${tokens.quality[0].toUpperCase()}${tokens.quality.slice(1)} Quality` : "Unknown Quality";
+  const clutter = tokens.clutter ? `${tokens.clutter[0].toUpperCase()}${tokens.clutter.slice(1)} Layout` : "Unknown Layout";
+  return `${ar} • ${face} + ${text} • ${quality} • ${clutter}`;
+}
+
+function buildClusterTokenSet(signature) {
+  return new Set(
+    String(signature || "")
+      .split("|")
+      .map((token) => token.trim())
+      .filter(Boolean)
+  );
+}
+
+function jaccardSimilarity(leftSet, rightSet) {
+  if (!leftSet.size || !rightSet.size) return 0;
+  const union = new Set([...leftSet, ...rightSet]);
+  if (!union.size) return 0;
+  let overlap = 0;
+  for (const token of leftSet) {
+    if (rightSet.has(token)) overlap += 1;
+  }
+  return overlap / union.size;
+}
+
+function isLikelyShort(item) {
+  const ar = Number(item?.thumb_insights?.aspect_ratio || item?.thumbnail_aspect_ratio || item?.aspect_ratio || 0);
+  const duration = Number(item?.duration || item?.duration_seconds || 0);
+  if (Number.isFinite(ar) && ar > 0) return ar < 1;
+  if (Number.isFinite(duration) && duration > 0) return duration <= 60;
+  return false;
+}
 
 function apiUrl(pathWithLeadingSlash) {
   return `${API_BASE}${pathWithLeadingSlash}`;
@@ -183,19 +264,26 @@ function RoundedDropdown({ value, options, onChange, darkMode, minWidth = 96 }) 
   );
 }
 
-function ThumbnailGrid({ items, portraitMode = false, showMetrics = false }) {
+function ThumbnailGrid({
+  items,
+  portraitMode = false,
+  showMetrics = false,
+  gridContext = "generic",
+}) {
   const [hoveredGroup, setHoveredGroup] = useState(null);
+  const [clusterTooltip, setClusterTooltip] = useState(null);
 
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-        gap: 12,
-        marginTop: 16,
-      }}
-    >
-      {items.map((v) => {
+    <>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+          gap: 12,
+          marginTop: 16,
+        }}
+      >
+        {items.map((v) => {
         const id = v.video_id || v.id;
         const href = v.url || `https://www.youtube.com/watch?v=${id}`;
         const thumb = v.thumbnail || v.thumbnail_url || "";
@@ -206,7 +294,9 @@ function ThumbnailGrid({ items, portraitMode = false, showMetrics = false }) {
         const qualityScore = v.thumb_insights?.quality_score;
         const aspectRatio = v.thumb_insights?.aspect_ratio ?? v.thumbnail_aspect_ratio;
 
-        const groupId = v.source_group || null;
+        const groupId = v.cluster_id || v.source_group || null;
+        const clusterName = String(v.cluster_name || groupId || "").trim();
+        const clusterColor = v.cluster_color || clusterColorFromId(groupId || clusterName || "default");
         const isGrouped = !!groupId && !!hoveredGroup;
         const isGroupMatch = isGrouped && groupId === hoveredGroup;
         const isGroupDimmed = isGrouped && !isGroupMatch;
@@ -246,12 +336,24 @@ function ThumbnailGrid({ items, portraitMode = false, showMetrics = false }) {
                     views_per_day: vpd,
                     quality_score: qualityScore,
                     aspect_ratio: aspectRatio,
+                    cluster_id: groupId,
+                    cluster_name: clusterName || null,
+                    cluster_color: clusterColor,
+                    __gridContext: gridContext,
                   },
                 })
               );
             }}
-            onMouseEnter={() => {
+            onMouseEnter={(event) => {
               setHoveredGroup(groupId);
+              if (clusterName) {
+                setClusterTooltip({
+                  x: event.clientX + 14,
+                  y: event.clientY + 16,
+                  text: clusterName,
+                  color: clusterColor,
+                });
+              }
               window.dispatchEvent(
                 new CustomEvent("thumbnail-hovered", {
                   detail: {
@@ -262,7 +364,19 @@ function ThumbnailGrid({ items, portraitMode = false, showMetrics = false }) {
                 })
               );
             }}
-            onMouseLeave={() => setHoveredGroup(null)}
+            onMouseMove={(event) => {
+              if (!clusterName) return;
+              setClusterTooltip({
+                x: event.clientX + 14,
+                y: event.clientY + 16,
+                text: clusterName,
+                color: clusterColor,
+              });
+            }}
+            onMouseLeave={() => {
+              setHoveredGroup(null);
+              setClusterTooltip(null);
+            }}
           >
             {portraitMode ? (
               <div style={{ width: "100%", aspectRatio: "9 / 16", background: "#111" }}>
@@ -306,11 +420,52 @@ function ThumbnailGrid({ items, portraitMode = false, showMetrics = false }) {
                   AR {Number(aspectRatio).toFixed(2)}
                 </div>
               )}
+              {!!clusterName && (
+                <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                  <span
+                    style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: "50%",
+                      background: clusterColor,
+                    }}
+                  />
+                  <span style={{ fontSize: 11, color: "#666", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {clusterName}
+                  </span>
+                </div>
+              )}
             </div>
           </button>
         );
-      })}
-    </div>
+        })}
+      </div>
+      {!!clusterTooltip?.text && (
+        <div
+          style={{
+            position: "fixed",
+            left: clusterTooltip.x,
+            top: clusterTooltip.y,
+            zIndex: 180,
+            pointerEvents: "none",
+            background: "rgba(13,16,22,0.92)",
+            color: "#fff",
+            border: `1px solid ${clusterTooltip.color}`,
+            borderRadius: 999,
+            padding: "6px 10px",
+            fontSize: 11,
+            fontWeight: 700,
+            boxShadow: "0 10px 24px rgba(0,0,0,0.28)",
+            maxWidth: 260,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {clusterTooltip.text}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -383,6 +538,7 @@ function ThumbnailPreviewModal({
   onClose,
   onDownload,
   onSearchProfile,
+  onSearchCluster,
   onVisitProfile,
   darkMode,
 }) {
@@ -405,6 +561,15 @@ function ThumbnailPreviewModal({
           <button type="button" className="thumb-preview-action-btn" title="Search profile in app" onClick={onSearchProfile}>
             {"\u2315"}
           </button>
+          <button
+            type="button"
+            className="thumb-preview-action-btn"
+            title="Search same cluster"
+            onClick={onSearchCluster}
+            disabled={!item.cluster_id && !item.source_group}
+          >
+            {"\u25CE"}
+          </button>
           <button type="button" className="thumb-preview-action-btn" title="Open profile on YouTube" onClick={onVisitProfile}>
             {"\u2197"}
           </button>
@@ -423,6 +588,18 @@ function ThumbnailPreviewModal({
             <div><strong>Views/Day:</strong> {item.views_per_day != null ? Number(item.views_per_day).toFixed(1) : "-"}</div>
             <div><strong>Published:</strong> {formatMetricValue(item.publishedAt || item.published_at)}</div>
             <div><strong>Source:</strong> {formatMetricValue(item.source_group)}</div>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              <strong>Cluster:</strong>
+              <span
+                style={{
+                  width: 9,
+                  height: 9,
+                  borderRadius: "50%",
+                  background: item.cluster_color || clusterColorFromId(item.cluster_id || item.source_group || "default"),
+                }}
+              />
+              <span>{formatMetricValue(item.cluster_name || item.cluster_id || item.source_group)}</span>
+            </div>
           </div>
         </aside>
       </div>
@@ -555,6 +732,7 @@ export default function App() {
   const [winnersError, setWinnersError] = useState("");
   const [winnersMeta, setWinnersMeta] = useState(null);
   const [patternSource, setPatternSource] = useState("winners");
+  const [patternExtractFormat, setPatternExtractFormat] = useState("all");
   const [patternName, setPatternName] = useState("");
   const [patternExtracting, setPatternExtracting] = useState(false);
   const [patternSaving, setPatternSaving] = useState(false);
@@ -591,6 +769,8 @@ export default function App() {
   const [patternLibraryMeta, setPatternLibraryMeta] = useState({ total: 0 });
   const [selectedPatternIds, setSelectedPatternIds] = useState([]);
   const [patternStats, setPatternStats] = useState(null);
+  const [selectedClusterFilters, setSelectedClusterFilters] = useState([]);
+  const [quickClusterSearch, setQuickClusterSearch] = useState(null);
 
   const [darkMode, setDarkMode] = useState(() => readCookie("darkMode") === "1");
   const [globalLoading, setGlobalLoading] = useState({ active: false, message: "", progress: 0 });
@@ -639,6 +819,13 @@ export default function App() {
       setGlobalLoading({ active: false, message: "", progress: 0 });
     }, 220);
   }, []);
+
+  const requirePro = useCallback((message = "This feature requires Pro.") => {
+    if (isProUser) return true;
+    setPatternError(message);
+    setPricingOpen(true);
+    return false;
+  }, [isProUser]);
 
   const showGlobalNotice = useCallback((message, tone = "info", durationMs = 5200) => {
     if (!message) return;
@@ -879,6 +1066,30 @@ export default function App() {
   const canLoadMoreTrending = isShorts ? !!nextTokenDiscover : !!nextTokenTop;
   const canLoadMoreProfile = !!profileNextToken && !profileLoading && !profilePaging;
 
+  const filteredTrendingItems = useMemo(() => {
+    if (!quickClusterSearch || quickClusterSearch.context !== "trending") return items;
+    return items.filter((item) => {
+      const token = String(item.cluster_id || item.source_group || "").trim();
+      return token && token === quickClusterSearch.clusterId;
+    });
+  }, [items, quickClusterSearch]);
+
+  const filteredProfileItems = useMemo(() => {
+    if (!quickClusterSearch || quickClusterSearch.context !== "profile") return profileItems;
+    return profileItems.filter((item) => {
+      const token = String(item.cluster_id || item.source_group || "").trim();
+      return token && token === quickClusterSearch.clusterId;
+    });
+  }, [profileItems, quickClusterSearch]);
+
+  const filteredWinnersItems = useMemo(() => {
+    if (!quickClusterSearch || quickClusterSearch.context !== "winners") return winnersItems;
+    return winnersItems.filter((item) => {
+      const token = String(item.cluster_id || item.source_group || "").trim();
+      return token && token === quickClusterSearch.clusterId;
+    });
+  }, [winnersItems, quickClusterSearch]);
+
   const loadMoreTrending = () => {
     const token = isShorts ? nextTokenDiscover : nextTokenTop;
     if (!token || trendingPaging) return;
@@ -1100,6 +1311,28 @@ export default function App() {
     if (url) window.open(url, "_blank", "noopener,noreferrer");
   };
 
+  const handleSearchClusterFromPreview = useCallback(() => {
+    if (!requirePro("Cluster search is a Pro-only feature.")) return;
+    if (!previewItem) return;
+    const clusterId = String(previewItem.cluster_id || previewItem.source_group || "").trim();
+    const clusterName = String(previewItem.cluster_name || clusterId || "").trim();
+    if (!clusterId) {
+      showGlobalNotice("This thumbnail has no cluster assignment yet.", "warn", 2200);
+      return;
+    }
+    const context = String(previewItem.__gridContext || tab || "trending");
+    if (context === "patterns") {
+      setSelectedClusterFilters([clusterId]);
+      setTab("patterns");
+      setPatternError("");
+    } else {
+      setQuickClusterSearch({ context, clusterId, clusterName });
+      setTab(context);
+    }
+    setPreviewItem(null);
+    showGlobalNotice(`Cluster filter: ${clusterName || clusterId}`, "info", 2200);
+  }, [requirePro, previewItem, tab, showGlobalNotice]);
+
   useEffect(() => {
     if (!profileHasSearched) return;
     if (!profileUrl.trim()) return;
@@ -1181,6 +1414,8 @@ export default function App() {
 
   useEffect(() => {
     setAppliedPatternItems([]);
+    setSelectedClusterFilters([]);
+    setQuickClusterSearch(null);
   }, [patternSource]);
 
   const patternSourceItems = useMemo(() => {
@@ -1189,8 +1424,15 @@ export default function App() {
     return winnersItems;
   }, [patternSource, items, profileItems, winnersItems]);
 
+  const scopedPatternSourceItems = useMemo(() => {
+    if (patternExtractFormat === "shorts") return patternSourceItems.filter((item) => isLikelyShort(item));
+    if (patternExtractFormat === "videos") return patternSourceItems.filter((item) => !isLikelyShort(item));
+    return patternSourceItems;
+  }, [patternSourceItems, patternExtractFormat]);
+
   const extractPatternsFromCurrentSource = useCallback(() => {
-    const candidates = (patternSourceItems || [])
+    if (!requirePro("Patterns are a Pro-only feature.")) return;
+    const candidates = (scopedPatternSourceItems || [])
       .map((item) => ({
         thumbnail_url: item.thumbnail || item.thumbnail_url || "",
         video_id: item.video_id || item.id || null,
@@ -1220,8 +1462,34 @@ export default function App() {
         return r.json();
       })
       .then((payload) => {
-        setPatternItems(payload.items || []);
-        setPatternClusters(payload.clusters || []);
+        const clusters = (payload.clusters || []).map((cluster) => ({
+          ...cluster,
+          display_name: buildClusterDisplayName(cluster),
+          color: clusterColorFromId(cluster.cluster_id),
+          _tokens: buildClusterTokenSet(cluster.signature),
+        }));
+
+        const withClusterMeta = (payload.items || []).map((item) => {
+          const signature = String(item.cluster_signature || "").trim();
+          const signatureTokens = buildClusterTokenSet(signature);
+          const matched = clusters
+            .filter((cluster) => jaccardSimilarity(signatureTokens, cluster._tokens) >= 0.74)
+            .map((cluster) => cluster.cluster_id);
+          const memberships = Array.from(new Set([item.cluster_id, ...matched].filter(Boolean)));
+          const primaryCluster = memberships[0] || item.cluster_id || "";
+          const clusterMeta = clusters.find((cluster) => cluster.cluster_id === primaryCluster);
+          return {
+            ...item,
+            cluster_id: primaryCluster,
+            cluster_memberships: memberships,
+            cluster_name: clusterMeta?.display_name || primaryCluster,
+            cluster_color: clusterMeta?.color || clusterColorFromId(primaryCluster),
+          };
+        });
+
+        setPatternItems(withClusterMeta);
+        setPatternClusters(clusters);
+        setSelectedClusterFilters([]);
       })
       .catch((err) => {
         setPatternError(err.message || "Failed to extract patterns.");
@@ -1230,7 +1498,7 @@ export default function App() {
         setPatternExtracting(false);
         endGlobalLoading(loadingToken);
       });
-  }, [patternSourceItems, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
+  }, [requirePro, scopedPatternSourceItems, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
 
   const saveCurrentPattern = useCallback(() => {
     if (!isProUser) {
@@ -1260,6 +1528,7 @@ export default function App() {
         clusters: patternClusters,
         filters: {
           source: patternSource,
+          source_format: patternExtractFormat,
           region,
           winners_format: winnersFormat,
           winners_category: winnersCategory,
@@ -1298,6 +1567,7 @@ export default function App() {
     patternClusters,
     patternName,
     patternSource,
+    patternExtractFormat,
     region,
     winnersFormat,
     winnersCategory,
@@ -1318,6 +1588,7 @@ export default function App() {
   }, []);
 
   const applySavedPattern = useCallback((patternId) => {
+    if (!requirePro("Patterns are a Pro-only feature.")) return;
     const targetId = String(patternId || applyPatternId || "").trim();
     if (!targetId) {
       setPatternError("Enter a valid pattern ID.");
@@ -1342,9 +1613,10 @@ export default function App() {
         setPatternApplying(false);
         endGlobalLoading(loadingToken);
       });
-  }, [applyPatternId, fetchPatternById, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
+  }, [requirePro, applyPatternId, fetchPatternById, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
 
   const applyActivePatternToCurrentSource = useCallback(() => {
+    if (!requirePro("Patterns are a Pro-only feature.")) return;
     if (!activePattern) {
       setPatternError("Load a saved pattern first.");
       return;
@@ -1355,7 +1627,7 @@ export default function App() {
       return;
     }
 
-    const candidates = (patternSourceItems || [])
+    const candidates = (scopedPatternSourceItems || [])
       .map((item) => ({
         thumbnail_url: item.thumbnail || item.thumbnail_url || "",
         video_id: item.video_id || item.id || null,
@@ -1388,8 +1660,31 @@ export default function App() {
         return r.json();
       })
       .then((payload) => {
-        setAppliedPatternItems(payload?.matches || []);
+        const clusters = (activePattern?.clusters || []).map((cluster) => ({
+          ...cluster,
+          display_name: cluster.display_name || buildClusterDisplayName(cluster),
+          color: cluster.color || clusterColorFromId(cluster.cluster_id),
+          _tokens: buildClusterTokenSet(cluster.signature),
+        }));
+        const enrichedMatches = (payload?.matches || []).map((item) => {
+          const signatureTokens = buildClusterTokenSet(item.cluster_signature);
+          const matched = clusters
+            .filter((cluster) => jaccardSimilarity(signatureTokens, cluster._tokens) >= 0.74)
+            .map((cluster) => cluster.cluster_id);
+          const memberships = Array.from(new Set([item.cluster_id, ...matched].filter(Boolean)));
+          const primaryCluster = memberships[0] || item.cluster_id || "";
+          const clusterMeta = clusters.find((cluster) => cluster.cluster_id === primaryCluster);
+          return {
+            ...item,
+            cluster_id: primaryCluster,
+            cluster_memberships: memberships,
+            cluster_name: clusterMeta?.display_name || primaryCluster,
+            cluster_color: clusterMeta?.color || clusterColorFromId(primaryCluster),
+          };
+        });
+        setAppliedPatternItems(enrichedMatches);
         setPatternMatchMeta(payload?.meta || null);
+        setSelectedClusterFilters([]);
       })
       .catch((err) => {
         setPatternError(err.message || "Failed to apply pattern.");
@@ -1401,7 +1696,8 @@ export default function App() {
   }, [
     activePattern,
     applyPatternId,
-    patternSourceItems,
+    scopedPatternSourceItems,
+    requirePro,
     patternMatchMode,
     patternMinSimilarity,
     startGlobalLoading,
@@ -1736,6 +2032,7 @@ export default function App() {
   ]);
 
   const resetPatternWorkspace = useCallback(() => {
+    if (!requirePro("Patterns are a Pro-only feature.")) return;
     setPatternError("");
     setPatternItems([]);
     setPatternClusters([]);
@@ -1748,8 +2045,53 @@ export default function App() {
     setComparePatternAId("");
     setComparePatternBId("");
     setSelectedPatternIds([]);
+    setSelectedClusterFilters([]);
+    setQuickClusterSearch(null);
     showGlobalNotice("Pattern workspace reset.", "info", 1800);
-  }, [showGlobalNotice]);
+  }, [requirePro, showGlobalNotice]);
+
+  const clusterFilterPool = useMemo(
+    () => (appliedPatternItems.length ? appliedPatternItems : patternItems),
+    [appliedPatternItems, patternItems]
+  );
+
+  const doesItemMatchClusters = useCallback((item, selectedClusters) => {
+    if (!selectedClusters.length) return true;
+    const memberships = Array.isArray(item?.cluster_memberships)
+      ? item.cluster_memberships
+      : [item?.cluster_id || item?.source_group].filter(Boolean);
+    return selectedClusters.every((clusterId) => memberships.includes(clusterId));
+  }, []);
+
+  const filteredPatternItems = useMemo(
+    () => patternItems.filter((item) => doesItemMatchClusters(item, selectedClusterFilters)),
+    [patternItems, selectedClusterFilters, doesItemMatchClusters]
+  );
+
+  const filteredAppliedPatternItems = useMemo(
+    () => appliedPatternItems.filter((item) => doesItemMatchClusters(item, selectedClusterFilters)),
+    [appliedPatternItems, selectedClusterFilters, doesItemMatchClusters]
+  );
+
+  const clusterAvailability = useMemo(() => {
+    const byId = {};
+    for (const cluster of patternClusters) {
+      const target = selectedClusterFilters.includes(cluster.cluster_id)
+        ? selectedClusterFilters
+        : [...selectedClusterFilters, cluster.cluster_id];
+      byId[cluster.cluster_id] = clusterFilterPool.some((item) => doesItemMatchClusters(item, target));
+    }
+    return byId;
+  }, [patternClusters, clusterFilterPool, selectedClusterFilters, doesItemMatchClusters]);
+
+  const toggleClusterFilter = useCallback((clusterId) => {
+    if (!requirePro("Patterns are a Pro-only feature.")) return;
+    const targetId = String(clusterId || "").trim();
+    if (!targetId) return;
+    setSelectedClusterFilters((prev) =>
+      prev.includes(targetId) ? prev.filter((id) => id !== targetId) : [...prev, targetId]
+    );
+  }, [requirePro]);
 
   const exportPatternLibrary = useCallback(() => {
     if (!isProUser) {
@@ -1971,6 +2313,7 @@ export default function App() {
         onClose={() => setPreviewItem(null)}
         onDownload={handleDownloadPreview}
         onSearchProfile={handleSearchProfileFromPreview}
+        onSearchCluster={handleSearchClusterFromPreview}
         onVisitProfile={handleVisitProfileFromPreview}
         darkMode={darkMode}
       />
@@ -1981,8 +2324,33 @@ export default function App() {
           <button onClick={() => setTab("trending")} style={tabButtonStyle(tab === "trending")}>Trending</button>
           <button onClick={() => setTab("profile")} style={tabButtonStyle(tab === "profile")}>Profile</button>
           <button onClick={() => setTab("winners")} style={tabButtonStyle(tab === "winners")}>Winners</button>
-          <button onClick={() => setTab("patterns")} style={tabButtonStyle(tab === "patterns")}>Patterns</button>
+          <button
+            onClick={() => {
+              if (!isProUser) {
+                setPatternError("Patterns are available on Pro.");
+                setPricingOpen(true);
+                return;
+              }
+              setTab("patterns");
+            }}
+            style={tabButtonStyle(tab === "patterns")}
+          >
+            Patterns
+          </button>
         </div>
+
+        {!!quickClusterSearch && tab === quickClusterSearch.context && (
+          <div style={{ ...infoBoxStyle, marginBottom: 10, borderRadius: 10, padding: "8px 12px", fontSize: 12 }}>
+            Cluster filter active: <strong>{quickClusterSearch.clusterName || quickClusterSearch.clusterId}</strong>
+            <button
+              type="button"
+              onClick={() => setQuickClusterSearch(null)}
+              style={{ ...tabButtonStyle(false), marginLeft: 10, minWidth: 72, padding: "6px 10px" }}
+            >
+              Clear
+            </button>
+          </div>
+        )}
 
         {tab === "trending" && (
           <>
@@ -2007,7 +2375,7 @@ export default function App() {
               <div style={{ minHeight: 240 }} />
             ) : (
               <>
-                <ThumbnailGrid items={items} portraitMode={isShorts} />
+                <ThumbnailGrid items={filteredTrendingItems} portraitMode={isShorts} gridContext="trending" />
                 <div ref={trendingLoadSentinelRef} style={{ height: 1 }} />
                 <div style={{ marginTop: 10, textAlign: "center", fontSize: 12, opacity: 0.75 }}>
                   {canLoadMoreTrending ? (trendingPaging ? "Loading more..." : "Scroll for more") : "End of results"}
@@ -2100,7 +2468,7 @@ export default function App() {
               <div style={{ minHeight: 240 }} />
             ) : (
               <>
-                <ThumbnailGrid items={profileItems} portraitMode={profileType === "shorts"} />
+                <ThumbnailGrid items={filteredProfileItems} portraitMode={profileType === "shorts"} gridContext="profile" />
                 <div ref={profileLoadSentinelRef} style={{ height: 1 }} />
                 <div style={{ marginTop: 10, textAlign: "center", fontSize: 12, opacity: 0.75 }}>
                   {canLoadMoreProfile ? (profilePaging ? "Loading more..." : "Scroll for more") : "End of results"}
@@ -2213,21 +2581,25 @@ export default function App() {
             {winnersLoading ? (
               <div style={{ minHeight: 240 }} />
             ) : (
-              <ThumbnailGrid items={winnersItems} portraitMode={winnersFormat === "shorts"} />
+              <ThumbnailGrid items={filteredWinnersItems} portraitMode={winnersFormat === "shorts"} gridContext="winners" />
             )}
           </>
         )}
 
         {tab === "patterns" && (
           <>
-            {!isProUser && (
-              <div style={{ ...infoBoxStyle, marginTop: 10, borderRadius: 10, padding: "10px 12px", textAlign: "center", fontSize: 12 }}>
-                Free mode active: extraction only. Upgrade to unlock save + compare.
-                <button type="button" style={{ ...tabButtonStyle(false), marginLeft: 10 }} onClick={() => setPricingOpen(true)}>
-                  View Pro
+            {!isProUser ? (
+              <div style={{ ...infoBoxStyle, marginTop: 12, borderRadius: 14, padding: "18px 14px", textAlign: "center" }}>
+                <div style={{ fontSize: 16, fontWeight: 700 }}>Patterns is a Pro Feature</div>
+                <div style={{ fontSize: 13, marginTop: 8, opacity: 0.85 }}>
+                  Save, compare, and apply cluster intelligence across channels.
+                </div>
+                <button type="button" style={{ ...actionButtonStyle(false), marginTop: 12 }} onClick={() => setPricingOpen(true)}>
+                  Unlock Pro
                 </button>
               </div>
-            )}
+            ) : (
+              <>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "center", marginTop: 10 }}>
               <input
                 value={patternLibraryQuery}
@@ -2288,6 +2660,13 @@ export default function App() {
                 darkMode={darkMode}
                 minWidth={124}
                 options={PATTERN_SOURCE_OPTIONS}
+              />
+              <RoundedDropdown
+                value={patternExtractFormat}
+                onChange={setPatternExtractFormat}
+                darkMode={darkMode}
+                minWidth={124}
+                options={PATTERN_FORMAT_OPTIONS}
               />
               <button
                 onClick={extractPatternsFromCurrentSource}
@@ -2534,16 +2913,42 @@ export default function App() {
               <div style={{ ...infoBoxStyle, marginTop: 12, borderRadius: 10, padding: "10px 12px" }}>
                 <div style={{ fontSize: 12, display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
                   <span>Source items: {patternSourceItems.length}</span>
+                  <span>Scoped: {scopedPatternSourceItems.length}</span>
                   <span>Clustered items: {patternItems.length}</span>
                   <span>Clusters: {patternClusters.length}</span>
                 </div>
-                <div style={{ marginTop: 8, fontSize: 12, display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+                <div style={{ marginTop: 10, fontSize: 12, display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
                   {patternClusters.map((cluster) => (
-                    <span key={cluster.cluster_id}>
-                      {cluster.cluster_id} ({cluster.count})
-                    </span>
+                    <button
+                      key={cluster.cluster_id}
+                      type="button"
+                      onClick={() => toggleClusterFilter(cluster.cluster_id)}
+                      disabled={!clusterAvailability[cluster.cluster_id] && !selectedClusterFilters.includes(cluster.cluster_id)}
+                      style={{
+                        borderRadius: 999,
+                        border: `1px solid ${cluster.color || "#5b6678"}`,
+                        background: selectedClusterFilters.includes(cluster.cluster_id)
+                          ? `${cluster.color || "#5b6678"}`
+                          : "transparent",
+                        color: selectedClusterFilters.includes(cluster.cluster_id) ? "#fff" : darkMode ? "#dce3ef" : "#1a2432",
+                        opacity: !clusterAvailability[cluster.cluster_id] && !selectedClusterFilters.includes(cluster.cluster_id) ? 0.35 : 1,
+                        cursor: "pointer",
+                        padding: "6px 10px",
+                        fontSize: 11,
+                        transform: selectedClusterFilters.includes(cluster.cluster_id) ? "scale(1.03)" : "scale(1)",
+                      }}
+                    >
+                      {cluster.display_name || cluster.cluster_id} ({cluster.count})
+                    </button>
                   ))}
                 </div>
+                {!!selectedClusterFilters.length && (
+                  <div style={{ marginTop: 8, textAlign: "center" }}>
+                    <button type="button" onClick={() => setSelectedClusterFilters([])} style={{ ...tabButtonStyle(false), minWidth: 88, padding: "6px 10px" }}>
+                      Clear Cluster Filter
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -2652,20 +3057,24 @@ export default function App() {
             )}
 
             {!!patternItems.length && (
-              <ThumbnailGrid items={patternItems.map((item) => ({
+              <ThumbnailGrid gridContext="patterns" items={filteredPatternItems.map((item) => ({
                 id: item.video_id || item.thumbnail_url,
                 title: item.title || item.cluster_id || "Pattern Item",
                 channelTitle: item.channel_title || item.features?.quality_band || "Pattern",
                 thumbnail: item.thumbnail_url,
                 views: 0,
                 source_group: item.cluster_id,
+                cluster_id: item.cluster_id,
+                cluster_name: item.cluster_name,
+                cluster_color: item.cluster_color,
+                cluster_memberships: item.cluster_memberships,
               }))} />
             )}
 
-            {!!appliedPatternItems.length && (
+            {!!filteredAppliedPatternItems.length && (
               <>
                 <div style={{ ...infoBoxStyle, marginTop: 12, borderRadius: 10, padding: "10px 12px", textAlign: "center", fontSize: 12 }}>
-                  Pattern matches in current source: {appliedPatternItems.length}
+                  Pattern matches in current source: {filteredAppliedPatternItems.length}
                   {patternMatchMeta && (
                     <span>
                       {" "}
@@ -2676,14 +3085,20 @@ export default function App() {
                     </span>
                   )}
                 </div>
-                <ThumbnailGrid items={appliedPatternItems.map((item) => ({
+                <ThumbnailGrid gridContext="patterns" items={filteredAppliedPatternItems.map((item) => ({
                   id: item.video_id || item.thumbnail_url,
                   title: item.title || "Matched Thumbnail",
                   channelTitle: `${item.channel_title || item.features?.quality_band || "Match"} | similarity ${Math.round(Number(item.match_similarity || 0) * 100)}%`,
                   thumbnail: item.thumbnail_url,
                   views: 0,
                   source_group: item.cluster_id,
+                  cluster_id: item.cluster_id,
+                  cluster_name: item.cluster_name,
+                  cluster_color: item.cluster_color,
+                  cluster_memberships: item.cluster_memberships,
                 }))} />
+              </>
+            )}
               </>
             )}
           </>
