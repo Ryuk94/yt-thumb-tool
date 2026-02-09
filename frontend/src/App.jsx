@@ -496,6 +496,11 @@ export default function App() {
   const [patternClusters, setPatternClusters] = useState([]);
   const [applyPatternId, setApplyPatternId] = useState("");
   const [activePattern, setActivePattern] = useState(null);
+  const [comparePatternAId, setComparePatternAId] = useState("");
+  const [comparePatternBId, setComparePatternBId] = useState("");
+  const [comparePatternA, setComparePatternA] = useState(null);
+  const [comparePatternB, setComparePatternB] = useState(null);
+  const [patternComparing, setPatternComparing] = useState(false);
   const [savedPatterns, setSavedPatterns] = useState(() => {
     try {
       const raw = localStorage.getItem("savedPatterns");
@@ -601,6 +606,12 @@ export default function App() {
       // ignore
     }
   }, [savedPatterns]);
+
+  useEffect(() => {
+    if (!savedPatterns.length) return;
+    if (!comparePatternAId) setComparePatternAId(savedPatterns[0].pattern_id);
+    if (!comparePatternBId) setComparePatternBId(savedPatterns[Math.min(1, savedPatterns.length - 1)].pattern_id);
+  }, [savedPatterns, comparePatternAId, comparePatternBId]);
 
   useEffect(() => {
     const onOpenPreview = (event) => {
@@ -1025,6 +1036,14 @@ export default function App() {
     endGlobalLoading,
   ]);
 
+  const fetchPatternById = useCallback(async (patternId) => {
+    const targetId = String(patternId || "").trim();
+    if (!targetId) throw new Error("Pattern ID is required.");
+    const response = await fetch(apiUrl(`/patterns/apply/${encodeURIComponent(targetId)}`));
+    if (!response.ok) throw new Error(await readApiErrorDetail(response, "Failed to load pattern."));
+    return response.json();
+  }, []);
+
   const applySavedPattern = useCallback((patternId) => {
     const targetId = String(patternId || applyPatternId || "").trim();
     if (!targetId) {
@@ -1035,13 +1054,9 @@ export default function App() {
     setPatternApplying(true);
     setPatternError("");
     const loadingToken = startGlobalLoading("Applying saved pattern...", 20);
-    fetch(apiUrl(`/patterns/apply/${encodeURIComponent(targetId)}`))
-      .then(async (r) => {
+    fetchPatternById(targetId)
+      .then(async (payload) => {
         updateGlobalLoading(loadingToken, "Loading pattern definition...", 74);
-        if (!r.ok) throw new Error(await readApiErrorDetail(r, "Failed to load pattern."));
-        return r.json();
-      })
-      .then((payload) => {
         setActivePattern(payload.pattern || null);
         setApplyPatternId(targetId);
       })
@@ -1052,7 +1067,33 @@ export default function App() {
         setPatternApplying(false);
         endGlobalLoading(loadingToken);
       });
-  }, [applyPatternId, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
+  }, [applyPatternId, fetchPatternById, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
+
+  const compareSavedPatterns = useCallback(() => {
+    const idA = String(comparePatternAId || "").trim();
+    const idB = String(comparePatternBId || "").trim();
+    if (!idA || !idB) {
+      setPatternError("Select two pattern IDs to compare.");
+      return;
+    }
+
+    setPatternComparing(true);
+    setPatternError("");
+    const loadingToken = startGlobalLoading("Comparing saved patterns...", 24);
+    Promise.all([fetchPatternById(idA), fetchPatternById(idB)])
+      .then(([left, right]) => {
+        updateGlobalLoading(loadingToken, "Mapping cluster overlap...", 78);
+        setComparePatternA(left.pattern || null);
+        setComparePatternB(right.pattern || null);
+      })
+      .catch((err) => {
+        setPatternError(err.message || "Failed to compare patterns.");
+      })
+      .finally(() => {
+        setPatternComparing(false);
+        endGlobalLoading(loadingToken);
+      });
+  }, [comparePatternAId, comparePatternBId, fetchPatternById, startGlobalLoading, updateGlobalLoading, endGlobalLoading]);
 
   const onProfileKeyDown = (e) => {
     if (e.key === "Enter") fetchProfile(true);
@@ -1109,6 +1150,20 @@ export default function App() {
     color: "#fff",
     cursor: "pointer",
   };
+
+  const compareRows = useMemo(() => {
+    const left = comparePatternA?.clusters || [];
+    const right = comparePatternB?.clusters || [];
+    const leftMap = new Map(left.map((cluster) => [String(cluster.signature || cluster.cluster_id || ""), Number(cluster.count || 0)]));
+    const rightMap = new Map(right.map((cluster) => [String(cluster.signature || cluster.cluster_id || ""), Number(cluster.count || 0)]));
+    const allKeys = Array.from(new Set([...leftMap.keys(), ...rightMap.keys()])).filter(Boolean);
+    return allKeys.map((signature) => ({
+      signature,
+      leftCount: leftMap.get(signature) || 0,
+      rightCount: rightMap.get(signature) || 0,
+      delta: (leftMap.get(signature) || 0) - (rightMap.get(signature) || 0),
+    }));
+  }, [comparePatternA, comparePatternB]);
 
   return (
     <div
@@ -1417,6 +1472,34 @@ export default function App() {
               </button>
             </div>
 
+            {!!savedPatterns.length && (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "center", marginTop: 10 }}>
+                <RoundedDropdown
+                  value={comparePatternAId || savedPatterns[0].pattern_id}
+                  onChange={setComparePatternAId}
+                  darkMode={darkMode}
+                  minWidth={220}
+                  options={savedPatterns.slice(0, 20).map((pattern) => ({
+                    value: pattern.pattern_id,
+                    label: `A: ${pattern.name}`,
+                  }))}
+                />
+                <RoundedDropdown
+                  value={comparePatternBId || savedPatterns[Math.min(1, savedPatterns.length - 1)].pattern_id}
+                  onChange={setComparePatternBId}
+                  darkMode={darkMode}
+                  minWidth={220}
+                  options={savedPatterns.slice(0, 20).map((pattern) => ({
+                    value: pattern.pattern_id,
+                    label: `B: ${pattern.name}`,
+                  }))}
+                />
+                <button onClick={compareSavedPatterns} disabled={patternComparing} style={actionButtonStyle(patternComparing)}>
+                  {patternComparing ? "Comparing..." : "Compare"}
+                </button>
+              </div>
+            )}
+
             {patternError && <div style={{ marginTop: 10, color: "#b00020", fontSize: 13, textAlign: "center" }}>{patternError}</div>}
 
             {!!savedPatterns.length && (
@@ -1458,6 +1541,39 @@ export default function App() {
                 </div>
                 <div style={{ marginTop: 6, fontSize: 12, textAlign: "center" }}>
                   Saved clusters: {(activePattern.clusters || []).length}
+                </div>
+              </div>
+            )}
+
+            {comparePatternA && comparePatternB && (
+              <div style={{ ...infoBoxStyle, marginTop: 12, borderRadius: 10, padding: "10px 12px" }}>
+                <div style={{ fontWeight: 700, fontSize: 13, textAlign: "center" }}>
+                  Compare: {comparePatternA.name || "Pattern A"} vs {comparePatternB.name || "Pattern B"}
+                </div>
+                <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+                  {compareRows.length ? compareRows.map((row) => (
+                    <div
+                      key={row.signature}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "minmax(0,1fr) auto auto auto",
+                        gap: 10,
+                        alignItems: "center",
+                        fontSize: 12,
+                      }}
+                    >
+                      <span style={{ textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {row.signature}
+                      </span>
+                      <span>A: {row.leftCount}</span>
+                      <span>B: {row.rightCount}</span>
+                      <span style={{ color: row.delta > 0 ? "#0b8f3a" : row.delta < 0 ? "#b00020" : undefined }}>
+                        Δ {row.delta}
+                      </span>
+                    </div>
+                  )) : (
+                    <div style={{ textAlign: "center", fontSize: 12 }}>No overlapping cluster signatures.</div>
+                  )}
                 </div>
               </div>
             )}
