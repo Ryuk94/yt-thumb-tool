@@ -358,6 +358,14 @@ function formatDuration(duration) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+function escapeCsvValue(value) {
+  const text = String(value ?? "");
+  if (text.includes(",") || text.includes("\"") || text.includes("\n")) {
+    return `"${text.replace(/"/g, "\"\"")}"`;
+  }
+  return text;
+}
+
 function ThumbnailPreviewModal({
   item,
   onClose,
@@ -1342,6 +1350,43 @@ export default function App() {
 
   const compareRows = useMemo(() => compareResult?.rows || [], [compareResult]);
 
+  const exportCompareCsv = useCallback(() => {
+    if (!isProUser) {
+      setPatternError("Export is a Pro feature.");
+      setPricingOpen(true);
+      return;
+    }
+    if (!compareResult || !compareRows.length) {
+      setPatternError("No comparison data available to export.");
+      return;
+    }
+    const nameA = compareResult?.pattern_a?.name || "Pattern A";
+    const nameB = compareResult?.pattern_b?.name || "Pattern B";
+    const header = ["signature", "left_count", "right_count", "delta"];
+    const lines = [
+      `comparison,${escapeCsvValue(nameA)},${escapeCsvValue(nameB)}`,
+      `overlap_ratio,${escapeCsvValue(compareResult?.summary?.overlap_ratio ?? 0)}`,
+      header.join(","),
+      ...compareRows.map((row) => [
+        escapeCsvValue(row.signature),
+        escapeCsvValue(row.left_count),
+        escapeCsvValue(row.right_count),
+        escapeCsvValue(row.delta),
+      ].join(",")),
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    link.download = `pattern-compare-${stamp}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    showGlobalNotice("Comparison exported as CSV.", "info", 2600);
+  }, [isProUser, compareResult, compareRows, showGlobalNotice]);
+
   return (
     <div
       style={{
@@ -1756,6 +1801,15 @@ export default function App() {
                     {(Number(compareResult.summary.overlap_ratio || 0) * 100).toFixed(0)}%)
                   </div>
                 )}
+                <div style={{ marginTop: 8, display: "flex", justifyContent: "center" }}>
+                  <button
+                    type="button"
+                    onClick={exportCompareCsv}
+                    style={tabButtonStyle(false)}
+                  >
+                    Export CSV
+                  </button>
+                </div>
                 <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
                   {compareRows.length ? compareRows.map((row) => (
                     <div
