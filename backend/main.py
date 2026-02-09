@@ -2408,3 +2408,64 @@ def channel_winners(
     resp = {"items": results, "meta": meta}
     cache_set_custom(cache_key, resp, WINNERS_CACHE_TTL_SECONDS)
     return resp
+
+
+@app.get("/youtube/channel/{channel_identifier}/videos")
+def channel_videos(
+    request: Request,
+    channel_identifier: str,
+    content_type: str = "all",  # all | shorts | videos
+    sort: str = "recent",  # recent | popular
+    max_results: int = 24,
+):
+    max_results = max(1, min(max_results, 50))
+    content_type = (content_type or "all").lower()
+    if content_type not in {"all", "shorts", "videos"}:
+        raise HTTPException(status_code=400, detail="content_type must be one of: all, shorts, videos")
+    sort_mode = (sort or "recent").lower()
+    if sort_mode not in {"recent", "popular"}:
+        raise HTTPException(status_code=400, detail="sort must be one of: recent, popular")
+
+    enforce_api_rate_limit(request, scope="channel_videos")
+
+    resolved_id = resolve_channel_id(channel_identifier)
+    cache_key = f"channel-videos:{FILTER_CACHE_VERSION}:{resolved_id}:{content_type}:{sort_mode}:{max_results}"
+    cached = cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    playlist_id = fetch_uploads_playlist(resolved_id)
+    if not playlist_id:
+        raise HTTPException(status_code=404, detail="Channel playlist not found")
+
+    candidate_limit = max(50, min(250, max_results * 4))
+    video_ids = fetch_playlist_video_ids(playlist_id, candidate_limit)
+    if not video_ids:
+        resp = {
+            "items": [],
+            "meta": {
+                "channel_id": resolved_id,
+                "content_type": content_type,
+                "sort": sort_mode,
+                "message": "No uploaded videos",
+            },
+        }
+        cache_set_custom(cache_key, resp, PROFILE_GRID_CACHE_TTL_SECONDS)
+        return resp
+
+    hydrated = hydrate_video_metadata(video_ids)
+    items = build_profile_items_from_videos(hydrated)
+    items = sort_profile_items(items, sort_mode)
+    typed_items = _filter_profile_items_by_type(items, content_type)
+
+    resp = {
+        "items": typed_items[:max_results],
+        "meta": {
+            "channel_id": resolved_id,
+            "content_type": content_type,
+            "sort": sort_mode,
+            "candidate_count": len(items),
+        },
+    }
+    cache_set_custom(cache_key, resp, PROFILE_GRID_CACHE_TTL_SECONDS)
+    return resp

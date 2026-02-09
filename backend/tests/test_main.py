@@ -6,6 +6,7 @@ from backend.app.services.thumb_quality import compute_quality_score
 from backend.main import (
     CACHE,
     build_candidates,
+    channel_videos,
     channel_winners,
     compute_outlier_scores,
     iso8601_duration_to_seconds,
@@ -272,6 +273,50 @@ def test_global_winners_quality_filter(monkeypatch):
     assert effective_min == 60
     assert with_quality["meta"].get("quality_relaxed") is False
     assert all(item["thumb_insights"]["quality_score"] >= effective_min for item in with_quality["items"])
+
+
+def test_channel_videos_endpoint(monkeypatch):
+    CACHE.clear()
+    request = make_request()
+
+    fake_videos = [
+        make_video("v1", 4, 3200, "PT3M20S"),
+        make_video("s1", 3, 2100, "PT45S"),
+        make_video("v2", 2, 1500, "PT2M15S"),
+    ]
+
+    monkeypatch.setattr(main_module, "resolve_channel_id", lambda _: "UC_TEST")
+    monkeypatch.setattr(main_module, "fetch_uploads_playlist", lambda _: "PL_TEST")
+    monkeypatch.setattr(main_module, "fetch_playlist_video_ids", lambda _a, _b: ["v1", "s1", "v2"])
+    monkeypatch.setattr(main_module, "hydrate_video_metadata", lambda _ids: fake_videos)
+
+    all_payload = channel_videos(
+        request=request,
+        channel_identifier="UC_TEST",
+        content_type="all",
+        sort="popular",
+        max_results=24,
+    )
+    shorts_payload = channel_videos(
+        request=request,
+        channel_identifier="UC_TEST",
+        content_type="shorts",
+        sort="recent",
+        max_results=24,
+    )
+    videos_payload = channel_videos(
+        request=request,
+        channel_identifier="UC_TEST",
+        content_type="videos",
+        sort="recent",
+        max_results=24,
+    )
+
+    assert len(all_payload["items"]) == 3
+    assert all_payload["meta"]["channel_id"] == "UC_TEST"
+    assert len(shorts_payload["items"]) == 1
+    assert shorts_payload["items"][0]["id"] == "s1"
+    assert all(item["duration"] > 60 for item in videos_payload["items"])
 
 
 def test_resolve_endpoint(monkeypatch):
