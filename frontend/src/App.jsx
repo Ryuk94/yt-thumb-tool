@@ -674,6 +674,26 @@ export default function App() {
     if (!comparePatternBId) setComparePatternBId(savedPatterns[Math.min(1, savedPatterns.length - 1)].pattern_id);
   }, [savedPatterns, comparePatternAId, comparePatternBId]);
 
+  const fetchSavedPatterns = useCallback((silent = false) => {
+    if (!silent) setPatternError("");
+    fetch(apiUrl("/patterns"))
+      .then(async (r) => {
+        if (!r.ok) throw new Error(await readApiErrorDetail(r, "Failed to load saved patterns."));
+        return r.json();
+      })
+      .then((payload) => {
+        const rows = Array.isArray(payload?.items) ? payload.items : [];
+        if (rows.length) {
+          setSavedPatterns(rows);
+          return;
+        }
+        if (!silent) setSavedPatterns([]);
+      })
+      .catch((err) => {
+        if (!silent) setPatternError(err.message || "Failed to load saved patterns.");
+      });
+  }, []);
+
   useEffect(() => {
     const onOpenPreview = (event) => {
       setPreviewItem(event.detail || null);
@@ -979,6 +999,10 @@ export default function App() {
     if (tab === "winners") requestWinners();
   }, [tab, winnersFormat, winnersCategory, region, winnersLimit, winnersWindowDays, winnersQuality, winnersMinQuality, requestWinners]);
 
+  useEffect(() => {
+    if (tab === "patterns") fetchSavedPatterns(true);
+  }, [tab, fetchSavedPatterns]);
+
   const patternSourceItems = useMemo(() => {
     if (patternSource === "trending") return items;
     if (patternSource === "profile") return profileItems;
@@ -1079,6 +1103,7 @@ export default function App() {
           },
           ...prev.filter((item) => item.pattern_id !== payload.pattern_id),
         ]);
+        fetchSavedPatterns(true);
         setApplyPatternId(payload.pattern_id || "");
       })
       .catch((err) => {
@@ -1101,6 +1126,7 @@ export default function App() {
     startGlobalLoading,
     updateGlobalLoading,
     endGlobalLoading,
+    fetchSavedPatterns,
   ]);
 
   const fetchPatternById = useCallback(async (patternId) => {

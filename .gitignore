@@ -11,6 +11,7 @@ venv/
 # Local environment files
 .env
 backend/.env
+backend/data_runtime/
 
 # Node artifacts
 node_modules/

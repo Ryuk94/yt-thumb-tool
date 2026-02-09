@@ -89,6 +89,11 @@ CACHE_TTL_SECONDS = 60 * 30  # 30 minutes
 SHORTS_DETECT_CACHE: dict[str, tuple[float, bool]] = {}
 SHORTS_DETECT_TTL_SECONDS = 60 * 60 * 6  # 6 hours
 PATTERN_LIBRARY: dict[str, dict[str, Any]] = {}
+PATTERN_LIBRARY_LOCK = threading.Lock()
+PATTERN_LIBRARY_FILE = Path(
+    os.getenv("PATTERN_LIBRARY_FILE")
+    or (Path(__file__).resolve().parent / "data_runtime" / "pattern_library.json")
+)
 
 def cache_get(key: str):
     hit = CACHE.get(key)
@@ -106,6 +111,32 @@ def cache_set(key: str, value: Any):
 
 def cache_set_custom(key: str, value: Any, ttl: int):
     CACHE[key] = (time.time() + ttl, value)
+
+
+def load_pattern_library() -> None:
+    with PATTERN_LIBRARY_LOCK:
+        PATTERN_LIBRARY.clear()
+        try:
+            if not PATTERN_LIBRARY_FILE.exists():
+                return
+            raw = json.loads(PATTERN_LIBRARY_FILE.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                for key, value in raw.items():
+                    if isinstance(key, str) and isinstance(value, dict):
+                        PATTERN_LIBRARY[key] = value
+        except (OSError, json.JSONDecodeError):
+            PATTERN_LIBRARY.clear()
+
+
+def persist_pattern_library(snapshot: dict[str, dict[str, Any]] | None = None) -> None:
+    if snapshot is None:
+        with PATTERN_LIBRARY_LOCK:
+            snapshot = dict(PATTERN_LIBRARY)
+    PATTERN_LIBRARY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PATTERN_LIBRARY_FILE.write_text(
+        json.dumps(snapshot, ensure_ascii=True, indent=2),
+        encoding="utf-8",
+    )
 
 
 class ResolveRequest(BaseModel):
@@ -1076,6 +1107,7 @@ async def youtube_quota_exceeded_handler(_request: Request, _exc: YouTubeQuotaEx
 
 @app.on_event("startup")
 def on_startup_refresh_established_pool():
+    load_pattern_library()
     maybe_schedule_established_pool_refresh()
 
 YOUTUBE_VIDEOS_LIST = "https://www.googleapis.com/youtube/v3/videos"
@@ -1665,7 +1697,10 @@ def save_pattern(payload: PatternSaveRequest, request: Request):
         "notes": payload.notes,
         "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
-    PATTERN_LIBRARY[pattern_id] = entry
+    with PATTERN_LIBRARY_LOCK:
+        PATTERN_LIBRARY[pattern_id] = entry
+        snapshot = dict(PATTERN_LIBRARY)
+    persist_pattern_library(snapshot)
     return {
         "ok": True,
         "pattern_id": pattern_id,
@@ -1673,10 +1708,30 @@ def save_pattern(payload: PatternSaveRequest, request: Request):
     }
 
 
+@app.get("/patterns")
+def list_patterns(request: Request):
+    enforce_api_rate_limit(request, scope="patterns_list")
+    with PATTERN_LIBRARY_LOCK:
+        patterns = list(PATTERN_LIBRARY.values())
+
+    patterns.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+    summarized = [
+        {
+            "pattern_id": pattern.get("pattern_id"),
+            "name": pattern.get("name"),
+            "created_at": pattern.get("created_at"),
+            "cluster_count": len(pattern.get("clusters") or []),
+        }
+        for pattern in patterns
+    ]
+    return {"items": summarized}
+
+
 @app.get("/patterns/apply/{pattern_id}")
 def apply_pattern(pattern_id: str, request: Request):
     enforce_api_rate_limit(request, scope="patterns_apply")
-    pattern = PATTERN_LIBRARY.get(pattern_id)
+    with PATTERN_LIBRARY_LOCK:
+        pattern = PATTERN_LIBRARY.get(pattern_id)
     if not pattern:
         raise HTTPException(status_code=404, detail="Pattern not found")
     return {"pattern_id": pattern_id, "pattern": pattern}

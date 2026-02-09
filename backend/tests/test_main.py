@@ -280,7 +280,9 @@ def test_resolve_endpoint(monkeypatch):
     assert payload["channel_id"] == "UC_RESOLVED"
 
 
-def test_patterns_extract_save_apply(monkeypatch):
+def test_patterns_extract_save_apply(monkeypatch, tmp_path):
+    main_module.PATTERN_LIBRARY.clear()
+    monkeypatch.setattr(main_module, "PATTERN_LIBRARY_FILE", tmp_path / "pattern_library.json")
     monkeypatch.setattr(
         main_module,
         "analyze_thumbnail",
@@ -316,6 +318,11 @@ def test_patterns_extract_save_apply(monkeypatch):
         make_request(),
     )
     pattern_id = save_response["pattern_id"]
+    assert main_module.PATTERN_LIBRARY_FILE.exists()
 
     applied = main_module.apply_pattern(pattern_id, make_request())
     assert applied["pattern"]["name"] == "portrait-face"
+
+    listed = main_module.list_patterns(make_request())
+    assert listed["items"]
+    assert listed["items"][0]["pattern_id"] == pattern_id
