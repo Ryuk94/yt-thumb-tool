@@ -183,7 +183,7 @@ function RoundedDropdown({ value, options, onChange, darkMode, minWidth = 96 }) 
   );
 }
 
-function ThumbnailGrid({ items, portraitMode = false }) {
+function ThumbnailGrid({ items, portraitMode = false, showMetrics = false }) {
   return (
     <div
       style={{
@@ -266,9 +266,9 @@ function ThumbnailGrid({ items, portraitMode = false }) {
             <div style={{ padding: 10 }}>
               <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.2, color: "#111" }}>{v.title}</div>
               <div style={{ opacity: 0.8, fontSize: 12, marginTop: 6, color: "#555" }}>
-                {channel} - {views.toLocaleString()} views
+                {showMetrics ? `${channel} - ${views.toLocaleString()} views` : channel}
               </div>
-              {outlier != null && (
+              {showMetrics && outlier != null && (
                 <div style={{ marginTop: 6, fontSize: 11, display: "flex", gap: 6 }}>
                   <span
                     style={{
@@ -284,7 +284,7 @@ function ThumbnailGrid({ items, portraitMode = false }) {
                   <span style={{ color: "#666" }}>{vpd.toFixed(1)} views/day</span>
                 </div>
               )}
-              {qualityScore != null && (
+              {showMetrics && qualityScore != null && (
                 <div style={{ marginTop: 6, fontSize: 11, color: "#444" }}>
                   Quality {qualityScore}
                 </div>
