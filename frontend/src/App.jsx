@@ -86,6 +86,7 @@ const HELP_CHAT_NODES = {
     ],
   },
 };
+const HELP_ANALYTICS_SCHEMA_VERSION = "2026.02.major.1";
 const CLUSTER_COLOR_PALETTE = [
   "#2D6CDF",
   "#00A7A0",
@@ -451,9 +452,34 @@ function ThumbnailGrid({
                 <img src={thumb} alt={v.title} style={{ width: "100%", height: "100%", display: "block", objectFit: "cover" }} />
               </div>
             )}
-            <div style={{ padding: 10 }}>
-              <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.2, color: "#111" }}>{v.title}</div>
-              <div style={{ opacity: 0.8, fontSize: 12, marginTop: 6, color: "#555" }}>
+            <div style={{ padding: 10, minHeight: 110, display: "flex", flexDirection: "column" }}>
+              <div
+                style={{
+                  fontWeight: 600,
+                  fontSize: 14,
+                  lineHeight: 1.25,
+                  color: "#111",
+                  display: "-webkit-box",
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: "vertical",
+                  overflow: "hidden",
+                  minHeight: 36,
+                }}
+              >
+                {v.title}
+              </div>
+              <div
+                style={{
+                  opacity: 0.8,
+                  fontSize: 12,
+                  marginTop: 6,
+                  color: "#555",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  minHeight: 16,
+                }}
+              >
                 {infoMode === "views"
                   ? `${channel} - ${views.toLocaleString()} views`
                   : infoMode === "relative_day"
@@ -896,6 +922,12 @@ export default function App() {
   const [helpNodeId, setHelpNodeId] = useState("root");
   const [helpAnalytics, setHelpAnalytics] = useState(() => {
     try {
+      const version = localStorage.getItem("helpAnalyticsVersion");
+      if (version !== HELP_ANALYTICS_SCHEMA_VERSION) {
+        localStorage.setItem("helpAnalyticsVersion", HELP_ANALYTICS_SCHEMA_VERSION);
+        localStorage.removeItem("helpAnalytics");
+        return { opens: 0, option_clicks: 0, node_hits: {}, option_hits: {} };
+      }
       const raw = localStorage.getItem("helpAnalytics");
       return raw
         ? JSON.parse(raw)
@@ -2403,22 +2435,25 @@ export default function App() {
 
   const baseButtonStyle = {
     borderRadius: 999,
-    border: "1px solid #ddd",
+    border: `1px solid ${darkMode ? "rgba(255,255,255,0.24)" : "rgba(16,24,36,0.22)"}`,
     padding: "8px 16px",
     fontSize: 14,
     cursor: "pointer",
     minWidth: 96,
+    background: darkMode ? "rgba(18,22,30,0.9)" : "rgba(255,255,255,0.95)",
+    boxShadow: darkMode ? "0 8px 16px rgba(0,0,0,0.22)" : "0 8px 16px rgba(16,24,36,0.08)",
   };
 
   const roundedFieldStyle = {
     borderRadius: 999,
-    border: `1px solid ${darkMode ? "rgba(255,255,255,0.2)" : "rgba(0,0,0,0.2)"}`,
+    border: `1px solid ${darkMode ? "rgba(255,255,255,0.24)" : "rgba(16,24,36,0.22)"}`,
     padding: "0 14px",
-    background: darkMode ? "#1c1c1f" : "#fff",
-    color: darkMode ? "#fff" : "#111",
+    background: darkMode ? "rgba(18,22,30,0.9)" : "rgba(255,255,255,0.95)",
+    color: darkMode ? "#f5f7fb" : "#111827",
     minHeight: 36,
     height: 36,
     boxSizing: "border-box",
+    boxShadow: darkMode ? "0 8px 16px rgba(0,0,0,0.22)" : "0 8px 16px rgba(16,24,36,0.08)",
   };
 
   const tabButtonStyle = (active) => ({
@@ -2454,6 +2489,14 @@ export default function App() {
   };
 
   const compareRows = useMemo(() => compareResult?.rows || [], [compareResult]);
+  const recentProfileSearches = useMemo(
+    () => recentSearches.filter((entry) => entry.tab === "profile"),
+    [recentSearches]
+  );
+  const recentDiscoverySearches = useMemo(
+    () => recentSearches.filter((entry) => entry.tab !== "profile"),
+    [recentSearches]
+  );
   const helpOptions = useMemo(() => {
     const node = HELP_CHAT_NODES[helpNodeId] || HELP_CHAT_NODES.root;
     return node.options || [];
@@ -2852,7 +2895,7 @@ export default function App() {
                 style={{ display: "none" }}
               />
               <button type="button" onClick={openHelpAssistant} style={tabButtonStyle(false)}>
-                💬 Open Assistant
+                ❓
               </button>
               <div style={{ fontSize: 11, opacity: 0.78 }}>
                 Assistant opens: {helpAnalytics.opens || 0} | option taps: {helpAnalytics.option_clicks || 0}
@@ -3115,9 +3158,9 @@ export default function App() {
         </div>
 
         <div className="app-sidebar__section">
-          <div className="app-sidebar__title">Recent Searches</div>
+          <div className="app-sidebar__title">Recent Discovery</div>
           <div className="app-sidebar__list">
-            {recentSearches.slice(0, 8).map((entry) => (
+            {recentDiscoverySearches.slice(0, 8).map((entry) => (
               <button
                 key={`${entry.tab}-${entry.label}-${entry.ts}`}
                 type="button"
@@ -3127,7 +3170,28 @@ export default function App() {
                 {entry.label}
               </button>
             ))}
-            {!recentSearches.length && <div className="app-sidebar__empty">No recent searches yet.</div>}
+            {!recentDiscoverySearches.length && <div className="app-sidebar__empty">No recent discovery searches yet.</div>}
+          </div>
+        </div>
+
+        <div className="app-sidebar__section">
+          <div className="app-sidebar__title">Recent Profile</div>
+          <div className="app-sidebar__list">
+            {recentProfileSearches.slice(0, 8).map((entry) => (
+              <button
+                key={`${entry.tab}-${entry.label}-${entry.ts}`}
+                type="button"
+                className="app-sidebar__chip"
+                onClick={() => {
+                  setTab("profile");
+                  const parts = String(entry.label || "").replace(/^Profile\s+/i, "");
+                  if (parts) setProfileUrl(parts);
+                }}
+              >
+                {entry.label}
+              </button>
+            ))}
+            {!recentProfileSearches.length && <div className="app-sidebar__empty">No recent profile searches yet.</div>}
           </div>
         </div>
 
